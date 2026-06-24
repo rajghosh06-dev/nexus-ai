@@ -1,0 +1,33 @@
+# Environments and Credentials
+.env
+
+# Python/Compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs and Editors
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Local Database & SQLite files
+chainlit.db
+chainlit.db-journal
+chainlit.db-wal
+chainlit.db-shm
+*.sqlite
+*.db
+
+# Data & AI Assets
+models/
+data/
+vector_store/
+
+# Chainlit Runtime Config & Workspace Uploads
+.chainlit/
+public/elements/

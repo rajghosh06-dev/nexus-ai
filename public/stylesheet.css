@@ -1,0 +1,171 @@
+/* =========================================
+   GLOBAL SCROLLBAR OVERHAUL (Custom Theme)
+   ========================================= */
+/* 1. Width of the scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+/* 2. Track background (The long strip) */
+html[data-theme='dark'] ::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+html[data-theme='light'] ::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+
+/* 3. The Thumb (The draggable slider handle) */
+html[data-theme='dark'] ::-webkit-scrollbar-thumb {
+    background: rgba(0, 240, 255, 0.2) !important;
+    border-radius: 10px;
+}
+html[data-theme='light'] ::-webkit-scrollbar-thumb {
+    background: rgba(0, 150, 180, 0.2) !important;
+    border-radius: 10px;
+}
+
+/* 4. Thumb Hover states */
+html[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 240, 255, 0.6) !important;
+}
+html[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 150, 180, 0.6) !important;
+}
+
+
+/* =========================================
+   LIQUID GLASS FROST THEME
+   ========================================= */
+
+/* BACKGROUNDS */
+html[data-theme='dark'] body {
+    background: radial-gradient(circle at 50% 0%, #0c1824 0%, #050a0f 100%) !important;
+    color: #e2e8f0 !important;
+}
+
+html[data-theme='light'] body {
+    background: radial-gradient(circle at 50% 0%, #f0f8ff 0%, #e0eaf5 100%) !important;
+    color: #1e293b !important;
+}
+
+/* GLASSMORPHISM ON PAPER ELEMENTS */
+html[data-theme='dark'] .MuiPaper-root {
+    background: rgba(15, 23, 34, 0.5) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(0, 240, 255, 0.1) !important;
+}
+
+html[data-theme='light'] .MuiPaper-root {
+    background: rgba(255, 255, 255, 0.6) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid rgba(0, 150, 180, 0.1) !important;
+}
+
+/* FIX: Ensure dropdown menus are opaque so text is readable */
+html[data-theme='dark'] .MuiMenu-paper {
+    background: #0f1722 !important;
+    backdrop-filter: none !important;
+    border: 1px solid #00f0ff !important;
+}
+
+html[data-theme='light'] .MuiMenu-paper {
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    border: 1px solid #0096b4 !important;
+}
+
+/* CHAT INPUT AREA */
+html[data-theme='light'] .MuiInputBase-root,
+html[data-theme='light'] div[role="presentation"] {
+    background-color: rgba(255, 255, 255, 0.8) !important;
+    border: 1px solid rgba(0, 150, 180, 0.3) !important;
+    box-shadow: 0 4px 30px rgba(0, 150, 180, 0.1) !important;
+    backdrop-filter: blur(8px) !important;
+}
+
+html[data-theme='light'] .MuiInputBase-root:focus-within {
+    box-shadow: 0 0 15px rgba(0, 200, 255, 0.4) !important;
+    border-color: #00d2ff !important;
+}
+
+html[data-theme='dark'] .MuiInputBase-root,
+html[data-theme='dark'] div[role="presentation"] {
+    background-color: rgba(10, 15, 25, 0.7) !important;
+    border: 1px solid rgba(0, 240, 255, 0.2) !important;
+    box-shadow: 0 4px 30px rgba(0, 240, 255, 0.05) !important;
+    backdrop-filter: blur(8px) !important;
+}
+
+html[data-theme='dark'] .MuiInputBase-root:focus-within {
+    box-shadow: 0 0 15px rgba(0, 240, 255, 0.3) !important;
+    border-color: #00f0ff !important;
+    transition: all 0.3s ease-in-out;
+}
+
+/* =========================================
+   ACTION BUTTONS & STARTERS: Liquid Tiles
+   ========================================= */
+.MuiStack-root .MuiButton-root,
+.cl-starter {
+    padding: 14px 24px !important;
+    margin: 8px 12px 8px 0 !important;
+    border-radius: 12px !important;
+    text-transform: none !important;
+    font-size: 15px !important;
+    font-weight: 500 !important;
+    min-width: 250px !important;
+    justify-content: flex-start !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    backdrop-filter: blur(8px) !important;
+}
+
+/* Light Mode Tile Styling */
+html[data-theme='light'] .MuiStack-root .MuiButton-root,
+html[data-theme='light'] .cl-starter {
+    background-color: rgba(255, 255, 255, 0.7) !important;
+    border: 1px solid rgba(0, 150, 180, 0.2) !important;
+    color: #1e293b !important;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.03) !important;
+}
+
+/* Dark Mode Tile Styling */
+html[data-theme='dark'] .MuiStack-root .MuiButton-root,
+html[data-theme='dark'] .cl-starter {
+    background-color: rgba(15, 25, 40, 0.6) !important;
+    border: 1px solid rgba(0, 240, 255, 0.2) !important;
+    color: #e2e8f0 !important;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Tile Hover Glow Effect */
+.MuiStack-root .MuiButton-root:hover,
+.cl-starter:hover {
+    transform: translateY(-3px) !important;
+}
+
+html[data-theme='light'] .MuiStack-root .MuiButton-root:hover,
+html[data-theme='light'] .cl-starter:hover {
+    border-color: #00c3ff !important;
+    box-shadow: 0 8px 20px rgba(0, 195, 255, 0.2) !important;
+    background-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+html[data-theme='dark'] .MuiStack-root .MuiButton-root:hover,
+html[data-theme='dark'] .cl-starter:hover {
+    border-color: #00f0ff !important;
+    box-shadow: 0 8px 20px rgba(0, 240, 255, 0.25) !important;
+    background-color: rgba(20, 35, 55, 0.8) !important;
+}
+
+/* Ensure avatars follow theme */
+.cl-avatar {
+    border: 1px solid rgba(0, 240, 255, 0.3);
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.1);
+}
+html[data-theme='light'] .cl-avatar {
+    border-color: rgba(0, 150, 180, 0.3);
+    box-shadow: 0 0 10px rgba(0, 150, 180, 0.1);
+}

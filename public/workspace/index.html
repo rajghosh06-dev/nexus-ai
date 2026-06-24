@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexusAI Document Workspace</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="http://localhost:8000/copilot/index.js"></script>
+</head>
+<body>
+    
+    <!-- Left Side: Reading Workspace (70% width) -->
+    <div class="workspace">
+        <!-- Top Section (80% height): Native Document Viewer -->
+        <div id="viewer-section" class="viewer-section">
+            <iframe id="doc-viewer" class="pdf-viewer" style="display: none;" src="" width="100%" height="100%"></iframe>
+            
+            <div id="viewer-placeholder" class="viewer-placeholder">
+                <div class="placeholder-icon">📚</div>
+                <h2>Native Document Workspace</h2>
+                <p>Upload files and select a PDF file below to read inline here.</p>
+            </div>
+            
+            <div id="script-preview-container" class="script-preview-container" style="display: none;">
+                <pre><code id="script-preview-code"></code></pre>
+            </div>
+        </div>
+
+        <!-- Bottom Section (20% height): Staging Tray & Dropzone -->
+        <div class="workspace-bottom">
+            <!-- Dropzone -->
+            <div class="upload-box" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                <div class="upload-box-content">
+                    <span class="upload-icon">⚡</span>
+                    <h3>Drag files here or Click to upload</h3>
+                </div>
+                <input type="file" id="file-input" style="display: none;" multiple accept=".png,.jpg,.jpeg,.webp,.doc,.docx,.pdf,.ppt,.pptx,.xls,.xlsx" onchange="handleFiles(this.files)">
+            </div>
+
+            <!-- Staging Tray -->
+            <div id="staging-tray" class="staging-tray">
+                <div class="tray-header">
+                    <h4>Staged Files <span id="staged-count">(0)</span></h4>
+                    <button id="analyze-btn" class="analyze-btn" onclick="analyzeStagedFiles()" disabled>Analyze Selected File</button>
+                </div>
+                <div id="staged-files-list" class="staged-files-list"></div>
+            </div>
+        </div>
+
+        <p id="status-text"></p>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Copilot Mount Point (30% width container) -->
+    <div class="copilot-container" id="copilot-root"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
