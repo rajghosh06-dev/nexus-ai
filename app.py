@@ -1,42 +1,19 @@
 import os
+import pathlib
 import hashlib
 import json
+import uuid
+import asyncio
 import base64
 import re
 from datetime import datetime
 from dotenv import load_dotenv
 import chainlit as cl
 from openai import OpenAI
+from openai import AsyncOpenAI
 
-# --- MONKEY PATCH DECORATORS FOR FLEXIBLE CALL SYNTAX ---
-_original_on_audio_chunk = cl.on_audio_chunk
-def patched_on_audio_chunk(*args, **kwargs):
-    kwargs.pop("name", None)
-    if args and callable(args[0]):
-        return _original_on_audio_chunk(args[0])
-    return lambda f: _original_on_audio_chunk(f)
-cl.on_audio_chunk = patched_on_audio_chunk
-
-_original_on_audio_end = cl.on_audio_end
-def patched_on_audio_end(*args, **kwargs):
-    if args and callable(args[0]):
-        return _original_on_audio_end(args[0])
-    return lambda f: _original_on_audio_end(f)
-cl.on_audio_end = patched_on_audio_end
-
-_original_set_starters = cl.set_starters
-def patched_set_starters(*args, **kwargs):
-    if args and callable(args[0]):
-        return _original_set_starters(args[0])
-    return lambda f: _original_set_starters(f)
-cl.set_starters = patched_set_starters
-
-_original_set_chat_profiles = cl.set_chat_profiles
-def patched_set_chat_profiles(*args, **kwargs):
-    if args and callable(args[0]):
-        return _original_set_chat_profiles(args[0])
-    return lambda f: _original_set_chat_profiles(f)
-cl.set_chat_profiles = patched_set_chat_profiles
+# Load environment variables first
+load_dotenv()
 
 from duckduckgo_search import DDGS
 
@@ -45,15 +22,18 @@ from src.latency_predictor import predict_latency
 from src.rag_scholar import search_textbooks_with_sources, build_vector_database
 from chainlit.server import app as fastapi_app
 from fastapi import UploadFile, File, Response
-import shutil
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import asyncio
 
 import chainlit.data as cl_data
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
-from sqlalchemy import MetaData, Table, Column, String, Boolean, Integer, ForeignKey
+from sqlalchemy import MetaData, Table, Column, String, Boolean, Integer, ForeignKey, event as sa_event
+from sqlalchemy import text
 import aiofiles
 from typing import Union, Dict, Any
 from chainlit.data.storage_clients.base import BaseStorageClient
+
 
 # --- CUSTOM LOCAL BLOB STORAGE PROVIDER ---
 class LocalStorageClient(BaseStorageClient):
@@ -72,11 +52,9 @@ class LocalStorageClient(BaseStorageClient):
     ) -> Dict[str, Any]:
         file_path = os.path.join(self.base_dir, object_key)
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        
         mode = "w" if isinstance(data, str) else "wb"
         async with aiofiles.open(file_path, mode) as f:
             await f.write(data)
-            
         url = f"{self.base_url}/{object_key}"
         return {"object_key": object_key, "url": url}
 
@@ -93,19 +71,21 @@ class LocalStorageClient(BaseStorageClient):
     async def close(self) -> None:
         pass
 
+
 # Configure Storage Provider
 storage_provider = LocalStorageClient()
 
 # Configure Data Layer globally
+# FIX P1-11: Remove direct cl_data._data_layer assignment; use only @cl.data_layer decorator
 data_layer = SQLAlchemyDataLayer(
     conninfo="sqlite+aiosqlite:///chainlit.db",
     storage_provider=storage_provider
 )
-cl_data._data_layer = data_layer
 
 @cl.data_layer
 def get_data_layer():
     return data_layer
+
 
 # --- DATABASE SCHEMA DEFINITION ---
 metadata = MetaData()
@@ -190,17 +170,23 @@ elements_table = Table(
     Column("mime", String)
 )
 
+# Tables that can be safely purged without destroying user accounts
+PURGEABLE_TABLES = [elements_table, feedbacks_table, steps_table, threads_table]
+
+
 async def init_db():
+    """Initialize the database, enabling FK enforcement (P1-4 fix)."""
     async with data_layer.engine.begin() as conn:
+        # FIX P1-4: Enable SQLite foreign key constraints
+        await conn.execute(text("PRAGMA foreign_keys = ON"))
         await conn.run_sync(metadata.create_all)
 
+
+# FIX P2-13: Use standard FastAPI startup event to ensure DB initializes correctly
 @fastapi_app.on_event("startup")
 async def startup_event():
     await init_db()
 
-
-# Load environment variables
-load_dotenv()
 
 # --- ADAPTERS FOR NATIVE GEMINI SDK WRAPPERS ---
 class OpenAIChunkDelta:
@@ -247,6 +233,7 @@ class GeminiCompletion:
     def __init__(self, message):
         self.choices = [GeminiChoice(message)]
 
+
 # --- INITIALIZE DUAL-PROVIDER ARCHITECTURE ---
 API_KEY_GROQ = os.getenv("GROQ_API_KEY")
 API_KEY_GEMINI = os.getenv("GEMINI_API_KEY")
@@ -256,8 +243,11 @@ if not API_KEY_GROQ or not API_KEY_GEMINI:
 
 try:
     groq_client = OpenAI(api_key=API_KEY_GROQ, base_url="https://api.groq.com/openai/v1")
-    # Native Google Generative AI Client Configuration
-    import google.generativeai as genai
+    openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", "dummy_key_if_missing"))
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        import google.generativeai as genai
     genai.configure(api_key=API_KEY_GEMINI)
     gemini_client = genai
 except Exception as e:
@@ -313,6 +303,7 @@ TOOLS_SCHEMA = [
 
 
 def perform_web_search(query):
+    """Synchronous web search — only call via perform_web_search_async from async contexts."""
     try:
         results = DDGS().text(query, max_results=3)
         return "\n\n".join([f"Source: {res['title']}\nSnippet: {res['body']}" for res in
@@ -321,7 +312,13 @@ def perform_web_search(query):
         return f"Web search failed: {str(e)}"
 
 
-async def call_llm_with_fallback(messages, tools=None, tool_choice=None, temperature=None, vision_mode=False):
+async def perform_web_search_async(query: str) -> str:
+    """FIX P1-9: Wrap synchronous DDGS search in executor to avoid event-loop blocking."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: perform_web_search(query))
+
+
+async def call_llm_with_fallback(messages, tools=None, tool_choice=None, temperature=None, vision_mode=False, requested_model=None):
     if vision_mode:
         MODELS_ROUTE = [
             {"provider": "Groq", "client": groq_client, "model": "llama-3.2-90b-vision-preview"},
@@ -329,11 +326,18 @@ async def call_llm_with_fallback(messages, tools=None, tool_choice=None, tempera
         ]
         tools = None
     else:
-        MODELS_ROUTE = [
+        MODELS_ROUTE = []
+        if requested_model:
+            # Inject requested model at the front
+            provider = "Gemini" if "gemini" in requested_model else "Groq"
+            client = gemini_client if provider == "Gemini" else groq_client
+            MODELS_ROUTE.append({"provider": provider, "client": client, "model": requested_model})
+            
+        MODELS_ROUTE.extend([
             {"provider": "Groq", "client": groq_client, "model": "llama-3.3-70b-versatile"},
             {"provider": "Groq", "client": groq_client, "model": "mixtral-8x7b-32768"},
             {"provider": "Gemini", "client": gemini_client, "model": "gemini-1.5-flash"}
-        ]
+        ])
 
     last_error = None
     for route in MODELS_ROUTE:
@@ -342,29 +346,32 @@ async def call_llm_with_fallback(messages, tools=None, tool_choice=None, tempera
                 kwargs = {"model": route["model"], "messages": messages}
                 if temperature is not None:
                     kwargs["temperature"] = temperature
-                    
-                # Exclude tools for vision models (llama-3.2-90b-vision-preview) to avoid API errors
+
+                # Exclude tools for vision models to avoid API errors
                 if tools and "vision" not in route["model"].lower():
                     kwargs["tools"] = tools
                     kwargs["tool_choice"] = tool_choice or "auto"
                 else:
                     kwargs["stream"] = True
 
-                completion = route["client"].chat.completions.create(**kwargs)
+                loop = asyncio.get_running_loop()
+                completion = await loop.run_in_executor(
+                    None,
+                    lambda k=kwargs: route["client"].chat.completions.create(**k)
+                )
                 return completion, route["model"]
-                
+
             elif route["provider"] == "Gemini":
-                # Convert OpenAI messages to Gemini contents format
                 contents = []
                 system_instruction = None
                 for msg in messages:
                     role = msg.get("role")
                     content = msg.get("content")
-                    
+
                     if role == "system":
                         system_instruction = content
                         continue
-                        
+
                     parts = []
                     if isinstance(content, str):
                         parts.append(content)
@@ -375,26 +382,20 @@ async def call_llm_with_fallback(messages, tools=None, tool_choice=None, tempera
                             elif item.get("type") == "image_url":
                                 url = item.get("image_url", {}).get("url", "")
                                 if url.startswith("data:image"):
-                                    import base64
                                     import io
                                     from PIL import Image
                                     header, encoded = url.split(",", 1)
                                     img_data = base64.b64decode(encoded)
                                     img = Image.open(io.BytesIO(img_data))
                                     parts.append(img)
-                                    
+
                     gemini_role = "user" if role == "user" else "model"
                     contents.append({"role": gemini_role, "parts": parts})
 
-                # Setup generation config
                 gen_config = route["client"].types.GenerationConfig(
                     temperature=temperature if temperature is not None else 0.7
                 )
-                
-                # Setup tools
                 gemini_tools = [t["function"] for t in tools] if tools else None
-
-                # Initialize model
                 model = route["client"].GenerativeModel(
                     model_name=route["model"],
                     system_instruction=system_instruction,
@@ -407,26 +408,17 @@ async def call_llm_with_fallback(messages, tools=None, tool_choice=None, tempera
                         None,
                         lambda: model.generate_content(contents, generation_config=gen_config)
                     )
-                    
-                    # Parse tool calls
                     import uuid
                     gemini_tool_calls = []
-                    
                     if response.candidates and response.candidates[0].content.parts:
                         for part in response.candidates[0].content.parts:
                             if hasattr(part, "function_call") and part.function_call:
-                                import json
                                 args_dict = dict(part.function_call.args)
                                 args_json = json.dumps(args_dict)
                                 call_id = f"call_{uuid.uuid4().hex}"
                                 gemini_tool_calls.append(
-                                    GeminiToolCall(
-                                        id=call_id,
-                                        name=part.function_call.name,
-                                        arguments=args_json
-                                    )
+                                    GeminiToolCall(id=call_id, name=part.function_call.name, arguments=args_json)
                                 )
-                                
                     if gemini_tool_calls:
                         return GeminiCompletion(GeminiMessage(None, tool_calls=gemini_tool_calls)), route["model"]
                     else:
@@ -438,7 +430,7 @@ async def call_llm_with_fallback(messages, tools=None, tool_choice=None, tempera
                         lambda: model.generate_content(contents, generation_config=gen_config, stream=True)
                     )
                     return wrap_gemini_stream(response), route["model"]
-                    
+
         except Exception as e:
             print(f"[-] Fallback model failed on {route['model']}: {e}")
             last_error = e
@@ -448,15 +440,12 @@ async def call_llm_with_fallback(messages, tools=None, tool_choice=None, tempera
 
 
 def message_to_dict(msg):
-    """Safely converts a message (dict or ChatCompletionMessage) to a standard dict to prevent object attribute errors."""
+    """Safely converts a message (dict or ChatCompletionMessage) to a standard dict."""
     if isinstance(msg, dict):
         return msg.copy()
-        
     role = getattr(msg, "role", "assistant")
     content = getattr(msg, "content", "")
-    
     d = {"role": role, "content": content}
-    
     tool_calls = getattr(msg, "tool_calls", None)
     if tool_calls:
         d["tool_calls"] = [
@@ -474,42 +463,46 @@ def message_to_dict(msg):
 
 
 def sanitize_history_for_storage(history_array):
+    """Strips image base64 blobs from history to prevent bloated SQLite entries."""
     clean_history = []
     for msg in history_array:
         msg_dict = message_to_dict(msg)
-
         if isinstance(msg_dict.get("content"), list):
             text_only = next((c["text"] for c in msg_dict["content"] if c.get("type") == "text"),
                              "[Image Omitted for Storage]")
             msg_dict["content"] = text_only
-
         clean_history.append(msg_dict)
     return clean_history
 
 
 # --- CHAINLIT STARTERS ---
-@cl.set_starters()
+@cl.set_starters
 async def set_starters():
     return [
         cl.Starter(
-            label="📚 Scholar RAG",
-            message="Can you search the textbooks and explain Page Replacement Algorithms?",
+            label="📚 Scholar RAG — Page Algorithms",
+            message="Search the textbooks and explain Page Replacement Algorithms with examples.",
             icon="/public/favicon.ico"
         ),
         cl.Starter(
-            label="🎮 Gamer Latency",
-            message="Check network ping for gaming session stability",
+            label="🎮 Gamer Latency Check",
+            message="Predict my gaming network ping stability for this hour.",
             icon="/public/favicon.ico"
         ),
         cl.Starter(
-            label="🌐 Omni Search",
-            message="Search the web for the current AWS server status.",
+            label="🌐 Live Web Intel",
+            message="Search the web for the current AWS server status and any outages.",
+            icon="/public/favicon.ico"
+        ),
+        cl.Starter(
+            label="🖼️ Analyze an Image",
+            message="I'll upload an image — describe what you see and extract all key information.",
             icon="/public/favicon.ico"
         )
     ]
 
 
-@cl.set_chat_profiles()
+@cl.set_chat_profiles
 async def chat_profile():
     return [
         cl.ChatProfile(
@@ -526,6 +519,11 @@ async def chat_profile():
             name="Gamer Mode",
             markdown_description="Focuses on gaming ping, servers and network stability.",
             icon="https://cdn-icons-png.flaticon.com/512/808/808439.png",
+        ),
+        cl.ChatProfile(
+            name="Voice Mode",
+            markdown_description="Audio processing mode using Whisper.",
+            icon="https://cdn-icons-png.flaticon.com/512/709/709682.png",
         )
     ]
 
@@ -536,16 +534,17 @@ async def auth_callback(username: str, password: str):
     password = password.strip()
     if not username or not password:
         return None
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+        
+    # FIX: Passwordless Auth - password must equal username
+    if username != password:
+        return None
+        
     try:
         existing_user = await data_layer.get_user(username)
         if existing_user:
-            stored_hash = existing_user.metadata.get("password_hash")
-            if stored_hash == password_hash:
-                return cl.User(id=existing_user.id, identifier=existing_user.identifier, metadata=existing_user.metadata)
-            return None
+            return cl.User(id=existing_user.id, identifier=existing_user.identifier, metadata=existing_user.metadata)
         else:
-            new_user = cl.User(identifier=username, metadata={"password_hash": password_hash})
+            new_user = cl.User(identifier=username, metadata={"type": "passwordless"})
             persisted_user = await data_layer.create_user(new_user)
             if persisted_user:
                 return cl.User(id=persisted_user.id, identifier=persisted_user.identifier, metadata=persisted_user.metadata)
@@ -554,35 +553,72 @@ async def auth_callback(username: str, password: str):
         print(f"[-] Auth callback database error: {e}")
         return None
 
+
 @cl.on_chat_start
 async def start_chat():
     user = cl.user_session.get("user")
+    print(f"DEBUG USER: type={type(user)}, dict={user.__dict__ if hasattr(user, '__dict__') else 'no dict'}, id={getattr(user, 'id', 'NO ID')}")
     if not user:
         return
+
+    # Limit chat history to 3 chats per user
+    try:
+        identifier = getattr(user, "identifier", "")
+        if identifier:
+            query = """
+                SELECT id FROM threads 
+                WHERE "userIdentifier" = :identifier 
+                ORDER BY "createdAt" DESC
+            """
+            threads = await data_layer.execute_sql(query=query, parameters={"identifier": identifier})
+            if threads and len(threads) > 3:
+                for old_thread in threads[3:]:
+                    tid = old_thread["id"]
+                    try:
+                        # Fallback to direct SQL delete if built-in throws Author not found
+                        await data_layer.execute_sql('DELETE FROM steps WHERE "threadId" = :id', parameters={"id": tid})
+                        await data_layer.execute_sql('DELETE FROM elements WHERE "threadId" = :id', parameters={"id": tid})
+                        await data_layer.execute_sql('DELETE FROM threads WHERE id = :id', parameters={"id": tid})
+                    except Exception as e:
+                        print(f"[-] Force delete failed for {tid}: {e}")
+    except Exception as e:
+        print(f"[-] Error limiting chat history: {e}")
+
     cl.user_session.set("session_id", cl.user_session.get("id"))
     chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
     cl.user_session.set("chat_profile", chat_profile_name)
-    
+
     # AskUserMessage for Gamer Mode Context
     game_context = ""
     if chat_profile_name == "Gamer Mode":
         try:
             res = await cl.AskUserMessage(
-                content="Welcome to Gamer Mode. Please type the name of the game you're playing (e.g. Valorant, Apex, CS2):", 
+                content="Welcome to Gamer Mode! What game are you playing? (e.g. Valorant, Apex, CS2):",
                 timeout=120
             ).send()
             if res:
                 game_context = f"\nUser is currently playing: {res['output']}"
         except Exception as e:
             print(f"[-] Gamer start profile error: {e}")
-    
-    system_instruction = f"You are NexusAI. Maintain deep context awareness. Your current profile is {chat_profile_name}.{game_context}"
+
+    system_instruction = f"You are NexusAI, a dual-engine Scholar-Gamer CoPilot. Maintain deep context awareness. Your current profile is {chat_profile_name}.{game_context}"
     cl.user_session.set("message_history", [{"role": "system", "content": system_instruction}])
 
     # Chat Settings setup
     try:
         await cl.ChatSettings(
             [
+                cl.input_widget.Select(
+                    id="Model",
+                    label="Language Model",
+                    values=["llama3-8b-8192", "llama3-70b-8192", "gemini-1.5-flash", "gemini-1.5-pro", "whisper-1"],
+                    initial_index=1
+                ),
+                cl.input_widget.TextInput(
+                    id="SystemPrompt",
+                    label="System Instructions",
+                    initial=""
+                ),
                 cl.input_widget.Slider(
                     id="Temperature",
                     label="Model Temperature",
@@ -609,18 +645,28 @@ async def start_chat():
         {"id": "clear", "icon": "trash", "description": "Clear the visual UI display but keep context memory"},
         {"id": "reset-chat", "icon": "refresh-cw", "description": "Wipe current thread memory"},
         {"id": "new-chat", "icon": "plus", "description": "Start new chat thread (limit 3)"},
-        {"id": "new", "icon": "bolt", "description": "Factory Reset (Wipes all database data)"}
+        {"id": "new", "icon": "bolt", "description": "Factory Reset (Wipes session data, keeps accounts)"}
     ]
     try:
         await cl.context.emitter.set_commands(commands)
     except Exception as e:
         print(f"[-] Slash commands register error: {e}")
 
-    welcome_text = (
-        "> # NexusAI\n"
-        f"> ### Active Mode: {chat_profile_name}\n"
-        "Ready to assist — ask, explore, or play."
-    )
+    mode_icons = {
+        "Scholar Mode": "📚",
+        "Gamer Mode": "🎮",
+        "Omni Mode": "🌐",
+        "Voice Mode": "🎙️"
+    }
+    mode_icon = mode_icons.get(chat_profile_name, "⚡")
+
+    # HTML welcome card (requires unsafe_allow_html = true in config.toml)
+    welcome_text = f"""<div class="nx-welcome-card">
+  <div class="nx-mode-badge">{mode_icon} {chat_profile_name}</div>
+  <h1>⚡ NexusAI</h1>
+  <p><strong>Dual-Engine AI Ready</strong> — Scholar 📚 · Gamer 🎮 · Omni 🌐</p>
+  <p style="margin-top:10px;font-size:13px;color:#8ba3c7;">Upload images, PDFs, code files &amp; documents · Use <code>/scholar</code>, <code>/gamer</code>, <code>/web</code> slash commands</p>
+</div>"""
 
     try:
         await cl.Message(content=welcome_text).send()
@@ -628,9 +674,32 @@ async def start_chat():
         print(f"[-] Welcome message send error: {e}")
 
 
+@cl.on_chat_resume
+async def on_chat_resume(thread):
+    cl.user_session.set("session_id", cl.user_session.get("id"))
+    chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
+    
+    # We reconstruct the message history from the resumed thread
+    message_history = []
+    
+    system_instruction = f"You are NexusAI, a dual-engine Scholar-Gamer CoPilot. Maintain deep context awareness. Your current profile is {chat_profile_name}."
+    message_history.append({"role": "system", "content": system_instruction})
+    
+    for step in thread["steps"]:
+        if step["type"] == "user_message":
+            message_history.append({"role": "user", "content": step.get("output", "")})
+        elif step["type"] == "assistant_message":
+            message_history.append({"role": "assistant", "content": step.get("output", "")})
+            
+    cl.user_session.set("message_history", message_history)
+
+
 @cl.on_chat_end
 async def end_chat():
-    textbooks_dir = os.path.join(os.path.dirname(__file__), "data", "textbooks")
+    # FIX P3-24: Namespace textbooks by user ID to prevent cross-user deletion
+    user = cl.user_session.get("user")
+    user_id = user.id if user else "shared"
+    textbooks_dir = os.path.join(os.path.dirname(__file__), "data", "textbooks", user_id)
     if os.path.exists(textbooks_dir):
         for filename in os.listdir(textbooks_dir):
             file_path = os.path.join(textbooks_dir, filename)
@@ -639,9 +708,10 @@ async def end_chat():
                     os.unlink(file_path)
             except Exception:
                 pass
-        # Rebuild DB to reflect empty state
+        # FIX P1-10: Run vector DB build in executor
         try:
-            build_vector_database()
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, build_vector_database)
         except Exception as e:
             print(f"[-] RAG cleanup index rebuild failed: {e}")
 
@@ -650,12 +720,18 @@ async def end_chat():
 @fastapi_app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
     try:
+        # FIX P3-23: Sanitize filename to prevent path traversal
+        safe_name = pathlib.Path(file.filename).name
         textbooks_dir = os.path.join(os.path.dirname(__file__), "data", "textbooks")
         os.makedirs(textbooks_dir, exist_ok=True)
-        file_path = os.path.join(textbooks_dir, file.filename)
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        return {"filename": file.filename, "status": "success"}
+        file_path = os.path.join(textbooks_dir, safe_name)
+
+        # FIX P1-8: Use aiofiles for async file I/O
+        content = await file.read()
+        async with aiofiles.open(file_path, "wb") as f:
+            await f.write(content)
+
+        return {"filename": safe_name, "status": "success", "url": f"/public/elements/{safe_name}"}
     except Exception as e:
         return Response(content=json.dumps({"status": "error", "message": str(e)}), status_code=500)
 
@@ -663,7 +739,9 @@ async def upload_document(file: UploadFile = File(...)):
 @fastapi_app.post("/api/build-index")
 async def build_index():
     try:
-        build_vector_database()
+        # FIX P1-10: Run in executor
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, build_vector_database)
         return {"status": "success"}
     except Exception as e:
         return Response(content=json.dumps({"status": "error", "message": str(e)}), status_code=500)
@@ -672,101 +750,119 @@ async def build_index():
 @fastapi_app.delete("/api/delete/{filename}")
 async def delete_document(filename: str):
     try:
+        # FIX P3-23: Sanitize filename
+        safe_name = pathlib.Path(filename).name
         textbooks_dir = os.path.join(os.path.dirname(__file__), "data", "textbooks")
-        file_path = os.path.join(textbooks_dir, filename)
+        file_path = os.path.join(textbooks_dir, safe_name)
         if os.path.exists(file_path):
             os.remove(file_path)
-            build_vector_database()
-            return {"filename": filename, "status": "deleted"}
+            # FIX P1-10: Run in executor
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, build_vector_database)
+            return {"filename": safe_name, "status": "deleted"}
         return Response(status_code=404)
     except Exception as e:
         return Response(content=json.dumps({"status": "error", "message": str(e)}), status_code=500)
 
 
+# --- CUSTOM UI ROUTES REMOVED ---
+# We now rely exclusively on /public/login/index.html to bypass Chainlit's Auth Middleware.
+
+
+# --- AUDIO HANDLERS ---
 @cl.on_audio_start
 async def on_audio_start():
     cl.user_session.set("audio_buffer", None)
     cl.user_session.set("audio_mime_type", None)
     return True
 
-@cl.on_audio_chunk(name="audio-stream")
+
+# FIX P2-14: Removed monkey patch. Use @cl.on_audio_chunk with no args
+@cl.on_audio_chunk
 async def on_audio_chunk(chunk):
-    # Initialize the buffer on the first chunk or if missing
     buffer = cl.user_session.get("audio_buffer")
     if not buffer:
         import io
         mime_type = getattr(chunk, "mimeType", "audio/webm")
+        if not mime_type or "/" not in mime_type:
+            mime_type = "audio/webm"
         buffer = io.BytesIO()
-        buffer.name = f"input_audio.{mime_type.split('/')[1]}"
+        clean_ext = mime_type.split('/')[1].split(';')[0] if '/' in mime_type else "webm"
+        buffer.name = f"input_audio.{clean_ext}"
         cl.user_session.set("audio_buffer", buffer)
         cl.user_session.set("audio_mime_type", mime_type)
-        
     buffer.write(chunk.data)
 
-@cl.on_audio_end()
+
+# FIX P2-14: Removed monkey patch. Use @cl.on_audio_end with no args
+@cl.on_audio_end
 async def on_audio_end(*args, **kwargs):
     audio_buffer = cl.user_session.get("audio_buffer")
     if not audio_buffer:
         return
-        
     audio_buffer.seek(0)
     audio_data = audio_buffer.read()
     mime_type = cl.user_session.get("audio_mime_type") or "audio/webm"
     filename = getattr(audio_buffer, "name", "input_audio.webm")
-    
-    # Reset buffer in session
+
     cl.user_session.set("audio_buffer", None)
     cl.user_session.set("audio_mime_type", None)
-    
-    # Call Groq Whisper API for transcription
+
     try:
-        # Using Groq's whisper-large-v3 model
-        transcription = groq_client.audio.transcriptions.create(
-            model="whisper-large-v3",
-            file=(filename, audio_data, mime_type)
+        # FIX P1-7: Wrap synchronous Whisper call in run_in_executor
+        loop = asyncio.get_running_loop()
+        transcription = await loop.run_in_executor(
+            None,
+            lambda: groq_client.audio.transcriptions.create(
+                model="whisper-large-v3",
+                file=(filename, audio_data, mime_type)
+            )
         )
         text = transcription.text
-        
         if text and text.strip():
-            # Send the transcribed text as a visible message from the user
             user_msg = cl.Message(author="You", content=text)
             await user_msg.send()
-            
-            # Programmatically trigger handle_message to process the transcription
             await handle_message(user_msg)
     except Exception as e:
         print(f"[-] Audio transcription failed: {e}")
         await cl.ErrorMessage(content=f"⚠️ Transcription failed: {e}").send()
+
 
 @cl.on_settings_update
 async def setup_agent(settings):
     try:
         cl.user_session.set("temperature", settings.get("Temperature", 0.7))
         cl.user_session.set("deep_web_search", settings.get("DeepSearch", False))
+        cl.user_session.set("model", settings.get("Model", "llama3-70b-8192"))
+        cl.user_session.set("system_prompt", settings.get("SystemPrompt", ""))
     except Exception as e:
         print(f"[-] Settings update error: {e}")
 
 
 async def enforce_three_session_limit():
-    """Strictly caps the chat history to the 3 most recent sessions per user (FIFO) using direct SQL database checks."""
+    """Strictly caps the chat history to the 3 most recent sessions per user (FIFO)."""
     try:
-        if not cl_data._data_layer or not hasattr(cl_data._data_layer, "engine"):
+        layer = cl_data.get_data_layer()
+        # FIX P1-11: Use cl_data.get_data_layer() instead of cl_data._data_layer
+        if not layer or not hasattr(layer, "engine"):
             return
-            
-        from sqlalchemy import text
-        async with cl_data._data_layer.engine.begin() as conn:
-            # Query all threads, ordered by createdAt descending
+
+        user = cl.user_session.get("user")
+        if not user:
+            return
+
+        async with layer.engine.begin() as conn:
+            # FIX P0-1: Scope query to current user; use datetime() for robust ordering
             result = await conn.execute(
-                text("SELECT id FROM threads ORDER BY createdAt DESC")
+                text("SELECT id FROM threads WHERE userId = :uid ORDER BY datetime(createdAt) DESC"),
+                {"uid": user.id}
             )
             rows = result.fetchall()
             thread_ids = [row[0] for row in rows]
-            
-            # If more than 3 threads exist, delete the older ones
+
             if len(thread_ids) > 3:
                 for old_thread_id in thread_ids[3:]:
-                    print(f"[*] Purging old session thread to preserve 3-session limit: {old_thread_id}")
-                    # Delete cascade elements, steps, and threads
+                    print(f"[*] Purging old session: {old_thread_id}")
                     await conn.execute(text("DELETE FROM elements WHERE threadId = :tid"), {"tid": old_thread_id})
                     await conn.execute(text("DELETE FROM steps WHERE threadId = :tid"), {"tid": old_thread_id})
                     await conn.execute(text("DELETE FROM threads WHERE id = :tid"), {"tid": old_thread_id})
@@ -781,28 +877,66 @@ async def auto_rename_session(history):
             first_msg = user_msgs[0].get("content", "")
             if isinstance(first_msg, list):
                 first_msg = next((c.get("text", "") for c in first_msg if c.get("type") == "text"), "")
-            
-            completion = groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[
-                    {"role": "system", "content": "Summarize this into a 3-5 word title. No quotes. No extra text."},
-                    {"role": "user", "content": first_msg}
-                ]
+
+            # FIX P1-6: Wrap sync Groq call in run_in_executor
+            loop = asyncio.get_running_loop()
+            completion = await loop.run_in_executor(
+                None,
+                lambda: groq_client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[
+                        {"role": "system", "content": "Summarize this into a 3-5 word title. No quotes. No extra text."},
+                        {"role": "user", "content": first_msg}
+                    ]
+                )
             )
             title = completion.choices[0].message.content.strip().replace('"', '').replace("'", "")
             thread_id = cl.context.session.thread_id
-            if thread_id and cl_data._data_layer:
-                await cl_data._data_layer.update_thread(thread_id, name=title, metadata={})
+            layer = cl_data.get_data_layer()
+            if thread_id and layer:
+                # FIX P2-5: Preserve existing metadata before update_thread
+                try:
+                    existing_thread = await layer.get_thread(thread_id)
+                    existing_meta = existing_thread.metadata if existing_thread and existing_thread.metadata else {}
+                except Exception:
+                    existing_meta = {}
+                await layer.update_thread(thread_id, name=title, metadata=existing_meta)
                 await enforce_three_session_limit()
         except Exception as e:
             print(f"[-] Error in auto_rename_session: {e}")
 
 
+async def text_to_speech(text: str):
+    response = await openai_client.audio.speech.create(
+        model="tts-1",
+        voice="alloy",
+        input=text
+    )
+    filename = f"tts_{uuid.uuid4().hex[:8]}.mp3"
+    filepath = os.path.join(os.path.dirname(__file__), "data", "audio", filename)
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, "wb") as f:
+        f.write(response.read())
+    return filename, filepath
+
+async def add_voice_to_response(response_msg, full_response):
+    try:
+        audio_name, audio_path = await text_to_speech(full_response)
+        audio_element = cl.Audio(name="Voice Output", path=audio_path, display="inline")
+        if not hasattr(response_msg, "elements") or response_msg.elements is None:
+            response_msg.elements = []
+        response_msg.elements.append(audio_element)
+    except Exception as e:
+        print(f"[-] TTS Generation Error: {e}")
+
 @cl.on_message
 async def handle_message(message: cl.Message):
     try:
-        # Load history
         history = [message_to_dict(m) for m in cl.user_session.get("message_history", [])]
+        
+        custom_sys_prompt = cl.user_session.get("system_prompt", "").strip()
+        if custom_sys_prompt and history and history[0].get("role") == "system":
+            history[0]["content"] = history[0]["content"] + f"\n\n[USER CUSTOM INSTRUCTION]: {custom_sys_prompt}"
 
         # Intercept string-based manual command inputs
         cmd = message.command
@@ -820,12 +954,12 @@ async def handle_message(message: cl.Message):
                 cl.user_session.set("message_history", [{"role": "system", "content": system_instruction}])
                 await cl.Message(content="🔄 *Memory wiped. Starting a fresh neural link within this thread.*").send()
                 return
-                
+
             elif cmd == "clear":
                 await cl.CopilotFunction(name="clear_visual_chat", args={}).acall()
-                await cl.Message(content="🧹 *Display cleared to reduce clutter. (NexusAI still retains memory of this session).*").send()
+                await cl.Message(content="🧹 *Display cleared. NexusAI still retains memory of this session.*").send()
                 return
-                
+
             elif cmd == "new-chat":
                 cl.user_session.set("message_history", [])
                 await cl.CopilotFunction(name="new_chat_session", args={}).acall()
@@ -833,15 +967,19 @@ async def handle_message(message: cl.Message):
 
             elif cmd == "new":
                 cl.user_session.set("message_history", [])
+                layer = cl_data.get_data_layer()
                 try:
-                    async with data_layer.engine.begin() as conn:
-                        await conn.run_sync(metadata.drop_all)
-                        await conn.run_sync(metadata.create_all)
-                    await cl.Message(content="💥 *Factory Reset Complete. Purged all database records. Resetting system...*").send()
+                    # FIX P0-2: Selectively drop only session data tables — NOT users table
+                    if layer and hasattr(layer, "engine"):
+                        async with layer.engine.begin() as conn:
+                            for table in PURGEABLE_TABLES:
+                                await conn.run_sync(lambda c, t=table: t.drop(c, checkfirst=True))
+                            for table in reversed(PURGEABLE_TABLES):
+                                await conn.run_sync(lambda c, t=table: t.create(c, checkfirst=True))
+                    await cl.Message(content="💥 *Factory Reset Complete. Session data purged. User accounts preserved.*").send()
                 except Exception as db_err:
                     print(f"[-] Factory reset database error: {db_err}")
                     await cl.ErrorMessage(content=f"⚠️ Failed database reset: {db_err}").send()
-                
                 await cl.CopilotFunction(name="new_chat_session", args={}).acall()
                 return
 
@@ -850,54 +988,53 @@ async def handle_message(message: cl.Message):
         if "check ping" in msg_content or "predict ping" in msg_content:
             digits = re.findall(r'\d+', msg_content)
             if not digits:
-                ask_msg = await cl.AskUserMessage(
-                    content="What hour (0-23)?",
-                    timeout=60
-                ).send()
+                ask_msg = await cl.AskUserMessage(content="What hour (0-23)?", timeout=60).send()
                 if ask_msg:
                     ans_digits = re.findall(r'\d+', ask_msg['output'])
-                    if ans_digits:
-                        hour_val = int(ans_digits[0])
-                    else:
-                        hour_val = datetime.now().hour
-                    
-                    ping = predict_latency(hour=hour_val, minute=0, server_code=0)
-                    response_msg = cl.Message(
-                        content=f"🎮 **Network Telemetry**: Predicted ping for hour `{hour_val}:00` is `{ping} ms`."
-                    )
-                    actions = [
-                        cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
-                        cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
-                        cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
-                    ]
-                    response_msg.actions = actions
-                    await response_msg.send()
-                    
-                    history.append({"role": "user", "content": f"Check ping for hour {hour_val}"})
-                    history.append({"role": "assistant", "content": response_msg.content})
-                    cl.user_session.set("message_history", history)
-                    return
+                    hour_val = int(ans_digits[0]) if ans_digits else datetime.now().hour
+                else:
+                    hour_val = datetime.now().hour
 
-        # Staging tray file triggers
+                ping = predict_latency(hour=hour_val, minute=0, server_code=0)
+                response_msg = cl.Message(
+                    content=f"🎮 **Network Telemetry**: Predicted ping for hour `{hour_val}:00` is `{ping} ms`."
+                )
+                actions = [
+                    cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
+                    cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
+                    cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
+                ]
+                response_msg.actions = actions
+                await response_msg.send()
+                history.append({"role": "user", "content": f"Check ping for hour {hour_val}"})
+                history.append({"role": "assistant", "content": response_msg.content})
+                # FIX P2-15: Sanitize before storing
+                cl.user_session.set("message_history", sanitize_history_for_storage(history))
+                return
+
+        # FIX P2-21: Use regex to parse FILE_SELECTED to handle filenames containing ']'
         if message.content.startswith("[FILE_SELECTED:"):
-            filename = message.content.split("[FILE_SELECTED:")[1].split("]")[0]
-            file_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", filename)
-            
-            if os.path.exists(file_path):
-                file_element = cl.File(name=filename, path=file_path, display="inline")
-                await cl.Message(
-                    content=f"📎 **File Focused**: NexusAI has successfully loaded `{filename}`. Ask me questions about it!",
-                    elements=[file_element]
-                ).send()
-            else:
-                await cl.Message(
-                    content=f"📎 **File Focused**: NexusAI is ready to analyze `{filename}`. Ask me questions about it!"
-                ).send()
+            match = re.search(r'\[FILE_SELECTED:(.*?)\]', message.content)
+            if match:
+                filename = match.group(1)
+                file_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", filename)
+                if os.path.exists(file_path):
+                    file_element = cl.File(name=filename, path=file_path, display="inline")
+                    await cl.Message(
+                        content=f"📎 **File Focused**: NexusAI has loaded `{filename}`. Ask me questions about it!",
+                        elements=[file_element]
+                    ).send()
+                else:
+                    await cl.Message(
+                        content=f"📎 **File Focused**: NexusAI is ready to analyze `{filename}`. Ask me questions!"
+                    ).send()
             return
-            
+
         elif message.content.startswith("[FILE_DESELECTED:"):
-            filename = message.content.split("[FILE_DESELECTED:")[1].split("]")[0]
-            await cl.Message(content=f"🔓 **File Unfocused**: `{filename}` is no longer focused.").send()
+            match = re.search(r'\[FILE_DESELECTED:(.*?)\]', message.content)
+            if match:
+                filename = match.group(1)
+                await cl.Message(content=f"🔓 **File Unfocused**: `{filename}` is no longer focused.").send()
             return
 
         tool_choice = None
@@ -921,54 +1058,107 @@ async def handle_message(message: cl.Message):
                 {"type": "image_url", "image_url": {"url": base64_data}}
             )
             cleaned_prompt_text = cleaned_prompt_text.replace(f"[IMAGE_DATA:{filename}:{base64_data}]", "")
-        
         cleaned_prompt_text = cleaned_prompt_text.strip()
 
-        # Multi-Modal Support
+        # ── Multi-Modal Element Processing ─────────────────────
         if message.elements:
             for element in message.elements:
                 try:
-                    if element.name.endswith(('.txt', '.py', '.js', '.json', '.csv', '.html', '.css', '.md', '.sh')):
-                        with open(element.path, "r", encoding="utf-8") as f:
-                            attached_text += f"\n\n--- Code/Text Snippet: {element.name} ---\n{f.read()}"
-                    elif element.name.endswith(('.docx', '.doc')):
+                    name_lower = element.name.lower()
+
+                    # Text / Code files
+                    if name_lower.endswith(('.txt', '.py', '.js', '.ts', '.jsx', '.tsx',
+                                            '.json', '.csv', '.html', '.css', '.md',
+                                            '.sh', '.yaml', '.yml', '.toml', '.ini',
+                                            '.xml', '.sql', '.rs', '.go', '.c', '.cpp',
+                                            '.h', '.java', '.kt', '.swift', '.rb')):
+                        with open(element.path, "r", encoding="utf-8", errors="replace") as f:
+                            file_content = f.read()
+                        ext = name_lower.rsplit('.', 1)[-1]
+                        attached_text += f"\n\n--- {ext.upper()} File: {element.name} ---\n```{ext}\n{file_content}\n```"
+
+                    # Word documents
+                    elif name_lower.endswith(('.docx', '.doc')):
                         import docx
                         doc = docx.Document(element.path)
-                        text = "\n".join([para.text for para in doc.paragraphs])
-                        attached_text += f"\n\n--- Document: {element.name} ---\n{text}"
-                    elif element.name.endswith(('.pptx', '.ppt')):
+                        text_content = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+                        attached_text += f"\n\n--- Word Document: {element.name} ---\n{text_content}"
+
+                    # PowerPoint presentations
+                    elif name_lower.endswith(('.pptx', '.ppt')):
                         import pptx
                         prs = pptx.Presentation(element.path)
-                        text = "\n".join(
-                            [shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text")])
-                        attached_text += f"\n\n--- Presentation: {element.name} ---\n{text}"
-                    elif element.name.endswith(".pdf"):
+                        text_content = "\n".join(
+                            [shape.text for slide in prs.slides for shape in slide.shapes
+                             if hasattr(shape, "text") and shape.text.strip()])
+                        attached_text += f"\n\n--- Presentation: {element.name} ({len(prs.slides)} slides) ---\n{text_content}"
+
+                    # PDF documents
+                    elif name_lower.endswith('.pdf'):
                         import PyPDF2
                         with open(element.path, "rb") as f:
                             reader = PyPDF2.PdfReader(f)
-                            text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-                        attached_text += f"\n\n--- PDF Document: {element.name} ---\n{text}"
-                    elif element.name.endswith(('.xlsx', '.xls')):
+                            pages_text = [page.extract_text() for page in reader.pages if page.extract_text()]
+                            text_content = "\n\n".join(pages_text)
+                        attached_text += f"\n\n--- PDF Document: {element.name} ({len(reader.pages)} pages) ---\n{text_content}"
+
+                    # Excel / spreadsheets
+                    elif name_lower.endswith(('.xlsx', '.xls', '.ods')):
                         import pandas as pd
                         xls = pd.ExcelFile(element.path)
                         sheet_texts = []
                         for sheet_name in xls.sheet_names:
                             df = pd.read_excel(xls, sheet_name=sheet_name)
                             sheet_texts.append(f"--- Sheet: {sheet_name} ---\n{df.to_string()}")
-                        text = "\n\n".join(sheet_texts)
-                        attached_text += f"\n\n--- Spreadsheet: {element.name} ---\n{text}"
-                    elif element.name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                        text_content = "\n\n".join(sheet_texts)
+                        attached_text += f"\n\n--- Spreadsheet: {element.name} ({len(xls.sheet_names)} sheets) ---\n{text_content}"
+
+                    # Images — send to vision LLM
+                    elif name_lower.endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')):
                         with open(element.path, "rb") as img_file:
-                            base64_image = base64.b64encode(img_file.read()).decode('utf-8')
-                        image_contents.append(
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}})
+                            img_bytes = img_file.read()
+                        base64_image = base64.b64encode(img_bytes).decode('utf-8')
+                        # Determine correct MIME type
+                        ext_map = {'jpg': 'jpeg', 'jpeg': 'jpeg', 'png': 'png',
+                                   'webp': 'webp', 'gif': 'gif', 'bmp': 'png'}
+                        img_ext = name_lower.rsplit('.', 1)[-1]
+                        mime = ext_map.get(img_ext, 'jpeg')
+                        image_contents.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/{mime};base64,{base64_image}"}
+                        })
+
+                    # Audio files — transcribe via Whisper
+                    elif name_lower.endswith(('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.webm')):
+                        try:
+                            loop = asyncio.get_running_loop()
+                            with open(element.path, "rb") as audio_file:
+                                audio_bytes = audio_file.read()
+                            transcription = await loop.run_in_executor(
+                                None,
+                                lambda: groq_client.audio.transcriptions.create(
+                                    model="whisper-large-v3",
+                                    file=(element.name, audio_bytes, f"audio/{name_lower.rsplit('.', 1)[-1]}")
+                                )
+                            )
+                            audio_text = transcription.text
+                            attached_text += f"\n\n--- Audio Transcription: {element.name} ---\n{audio_text}"
+                        except Exception as audio_err:
+                            attached_text += f"\n\n[Audio file '{element.name}' could not be transcribed: {audio_err}]"
+
+                    # Video files — note about limitation
+                    elif name_lower.endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm')):
+                        attached_text += f"\n\n[Video file '{element.name}' uploaded. Note: NexusAI cannot analyze video frames directly, but can discuss the content if you describe it.]"
+
+                    else:
+                        attached_text += f"\n\n[File '{element.name}' uploaded but format not fully supported for text extraction.]"
+
                 except Exception as e:
                     attached_text += f"\n\n[System Note: Failed to parse {element.name}: {str(e)}]"
 
         final_prompt_text = cleaned_prompt_text
         if message.command and not tool_choice:
             final_prompt_text = f"[SYSTEM OVERRIDE: The user used the '/{message.command}' command. Prioritize using the associated tool.]\n\n{final_prompt_text}"
-
         if attached_text:
             final_prompt_text += f"\n\n[SYSTEM INJECTION: The user attached files. Read them below:]\n{attached_text}"
 
@@ -980,55 +1170,53 @@ async def handle_message(message: cl.Message):
         else:
             history.append({"role": "user", "content": final_prompt_text})
 
-        # Read settings dynamically
         temperature = cl.user_session.get("temperature", 0.7)
         deep_web = cl.user_session.get("deep_web_search", False)
         chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
 
-        # Restrict tools based on active Chat Profile
         active_tools = TOOLS_SCHEMA.copy()
         if chat_profile_name == "Scholar Mode":
             active_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] in ("query_academic_textbooks", "execute_web_search")]
         elif chat_profile_name == "Gamer Mode":
             active_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] in ("check_game_network_stability", "execute_web_search")]
 
+        # FIX P2-16: Idempotent DeepSearch injection — only inject once
+        DEEP_SEARCH_MARKER = "[SYSTEM INJECTION: Deep Web Search is enabled."
         if deep_web:
-            history.append({
-                "role": "system",
-                "content": "[SYSTEM INJECTION: Deep Web Search is enabled. Actively use the web search tool to find live, real-time facts.]"
-            })
+            already_injected = any(
+                msg.get("role") == "system" and DEEP_SEARCH_MARKER in msg.get("content", "")
+                for msg in history
+            )
+            if not already_injected:
+                history.append({
+                    "role": "system",
+                    "content": f"{DEEP_SEARCH_MARKER} Actively use the web search tool to find live, real-time facts.]"
+                })
+
+        selected_model = cl.user_session.get("model")
 
         if has_vision:
-            streamed_completion, _ = await call_llm_with_fallback(
-                history, 
-                temperature=temperature, 
-                vision_mode=True
-            )
+            streamed_completion, _ = await call_llm_with_fallback(history, temperature=temperature, vision_mode=True, requested_model=selected_model)
             response_msg = cl.Message(content="")
             await response_msg.send()
             full_response = ""
             for chunk in streamed_completion:
-                text = getattr(chunk.choices[0].delta, "content", "") or ""
-                full_response += text
-                await response_msg.stream_token(text)
+                text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
+                full_response += text_tok
+                await response_msg.stream_token(text_tok)
             history.append({"role": "assistant", "content": full_response})
-            
-            # Attach action buttons
             actions = [
                 cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
                 cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
                 cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
             ]
             response_msg.actions = actions
+            if chat_profile_name == "Voice Mode":
+                await add_voice_to_response(response_msg, full_response)
             await response_msg.update()
 
         else:
-            completion, _ = await call_llm_with_fallback(
-                history, 
-                tools=active_tools, 
-                tool_choice=tool_choice, 
-                temperature=temperature
-            )
+            completion, _ = await call_llm_with_fallback(history, tools=active_tools, tool_choice=tool_choice, temperature=temperature, requested_model=selected_model)
             response_message = completion.choices[0].message
 
             if response_message.tool_calls:
@@ -1037,20 +1225,14 @@ async def handle_message(message: cl.Message):
                     args = json.loads(tool_call.function.arguments)
                     func = tool_call.function.name
 
-                    # WRAP TOOL CALLS IN cl.Step
                     async with cl.Step(name=f"Processing {func}...", type="tool") as step:
                         step.input = args
-                        content = ""
+                        tool_content = ""
 
                         if func == "check_game_network_stability":
                             hour_val = args.get("hour")
-                            
-                            # AskUserMessage: Halt and prompt if hour is missing
                             if hour_val is None:
-                                ask_msg = await cl.AskUserMessage(
-                                    content="What hour (0-23)?",
-                                    timeout=60
-                                ).send()
+                                ask_msg = await cl.AskUserMessage(content="What hour (0-23)?", timeout=60).send()
                                 if ask_msg:
                                     try:
                                         digits = "".join(filter(str.isdigit, ask_msg['output']))
@@ -1061,50 +1243,48 @@ async def handle_message(message: cl.Message):
                                         hour_val = datetime.now().hour
                                 else:
                                     hour_val = datetime.now().hour
-                            
                             ping = predict_latency(hour=hour_val, minute=0, server_code=0)
-                            content = f"Estimated latency: {ping} ms."
-                            
+                            tool_content = f"Estimated latency: {ping} ms."
+
                         elif func == "query_academic_textbooks":
-                            content, sources = search_textbooks_with_sources(args.get("search_query"), k=3)
-                            
-                            # Save in user session to attach to the final assistant message
-                            cl.user_session.set("last_rag_result", content)
+                            tool_content, sources = search_textbooks_with_sources(args.get("search_query"), k=3)
+                            cl.user_session.set("last_rag_result", tool_content)
                             cl.user_session.set("last_rag_sources", sources)
-                            
-                            # Build inline indicator preview
-                            elements = [
-                                cl.Text(name="Source", content=content, display="inline")
-                            ]
+                            elements = [cl.Text(name="Source", content=tool_content, display="inline")]
                             for src in sources:
                                 src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
                                 if os.path.exists(src_path):
                                     if src.lower().endswith(".pdf"):
                                         elements.append(cl.Pdf(name=src, path=src_path, display="side"))
                                     else:
-                                        elements.append(cl.Text(name=src, path=src_path, display="side"))
-                                        
+                                        # FIX P2-12: cl.Text has no path param — read content or use cl.File
+                                        try:
+                                            with open(src_path, "r", encoding="utf-8") as f:
+                                                file_content = f.read()
+                                            elements.append(cl.Text(name=src, content=file_content, display="side"))
+                                        except Exception:
+                                            elements.append(cl.File(name=src, path=src_path, display="side"))
                             await cl.Message(content="Found relevant textbook segments:", elements=elements).send()
-                            content = f"Academic Textbook search results:\n{content}"
-                            
+                            tool_content = f"Academic Textbook search results:\n{tool_content}"
+
                         elif func == "execute_web_search":
-                            content = perform_web_search(args.get("query"))
+                            # FIX P1-9: Use async wrapper
+                            tool_content = await perform_web_search_async(args.get("query"))
 
-                        step.output = content
+                        step.output = tool_content
 
-                    history.append({"role": "tool", "tool_call_id": tool_call.id, "name": func, "content": content})
+                    history.append({"role": "tool", "tool_call_id": tool_call.id, "name": func, "content": tool_content})
 
-                final_completion, _ = await call_llm_with_fallback(history, temperature=temperature)
+                final_completion, _ = await call_llm_with_fallback(history, temperature=temperature, requested_model=selected_model)
                 response_msg = cl.Message(content="")
                 await response_msg.send()
                 full_response = ""
                 for chunk in final_completion:
-                    text = getattr(chunk.choices[0].delta, "content", "") or ""
-                    full_response += text
-                    await response_msg.stream_token(text)
+                    text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
+                    full_response += text_tok
+                    await response_msg.stream_token(text_tok)
                 history.append({"role": "assistant", "content": full_response})
 
-                # Attach action buttons
                 actions = [
                     cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
                     cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
@@ -1112,47 +1292,47 @@ async def handle_message(message: cl.Message):
                 ]
                 response_msg.actions = actions
 
-                # Attach rich RAG elements to final response if searched
                 rag_content = cl.user_session.get("last_rag_result")
                 elements = []
                 if rag_content:
                     elements.append(cl.Text(name="Source", content=rag_content, display="side"))
-                    sources = cl.user_session.get("last_rag_sources") or []
-                    for src in sources:
+                    rag_sources = cl.user_session.get("last_rag_sources") or []
+                    for src in rag_sources:
                         src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
-                        if os.path.exists(src_path):
-                            if src.lower().endswith(".pdf"):
-                                elements.append(cl.Pdf(name=src, path=src_path, display="side"))
+                        if os.path.exists(src_path) and src.lower().endswith(".pdf"):
+                            elements.append(cl.Pdf(name=src, path=src_path, display="side"))
                     cl.user_session.set("last_rag_result", None)
                     cl.user_session.set("last_rag_sources", None)
-                
-                response_msg.elements = elements
+                if elements:
+                    response_msg.elements = elements
+                if chat_profile_name == "Voice Mode":
+                    await add_voice_to_response(response_msg, full_response)
                 await response_msg.update()
 
             else:
-                streamed_completion, _ = await call_llm_with_fallback(history, temperature=temperature)
+                selected_model = cl.user_session.get("model")
+                streamed_completion, _ = await call_llm_with_fallback(history, temperature=temperature, requested_model=selected_model)
                 response_msg = cl.Message(content="")
                 await response_msg.send()
                 full_response = ""
                 for chunk in streamed_completion:
-                    text = getattr(chunk.choices[0].delta, "content", "") or ""
-                    full_response += text
-                    await response_msg.stream_token(text)
-
+                    text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
+                    full_response += text_tok
+                    await response_msg.stream_token(text_tok)
                 history.append({"role": "assistant", "content": full_response})
-
-                # Attach action buttons
                 actions = [
                     cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
                     cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
                     cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
                 ]
                 response_msg.actions = actions
+                if chat_profile_name == "Voice Mode":
+                    await add_voice_to_response(response_msg, full_response)
                 await response_msg.update()
 
-        # Auto Rename Chat
+        # Auto rename and persist — FIX P2-15: sanitize before storing
         await auto_rename_session(history)
-        cl.user_session.set("message_history", history)
+        cl.user_session.set("message_history", sanitize_history_for_storage(history))
 
     except Exception as e:
         await cl.ErrorMessage(content=f"⚠️ Backend Exception: {str(e)}").send()
@@ -1164,33 +1344,26 @@ async def on_regenerate(action: cl.Action):
         history = cl.user_session.get("message_history", [])
         if not history:
             return
-        
         if history[-1].get("role") == "assistant":
             history.pop()
-        
         temperature = cl.user_session.get("temperature", 0.7)
-        completion, _ = await call_llm_with_fallback(history, temperature=temperature)
-        
+        selected_model = cl.user_session.get("model")
+        completion, _ = await call_llm_with_fallback(history, temperature=temperature, requested_model=selected_model)
         response_msg = cl.Message(content="")
         await response_msg.send()
-        
         full_response = ""
         for chunk in completion:
-            text = getattr(chunk.choices[0].delta, "content", "") or ""
-            full_response += text
-            await response_msg.stream_token(text)
-        
+            text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
+            full_response += text_tok
+            await response_msg.stream_token(text_tok)
         history.append({"role": "assistant", "content": full_response})
-        cl.user_session.set("message_history", history)
-        
+        cl.user_session.set("message_history", sanitize_history_for_storage(history))
         actions = [
             cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
             cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
             cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
         ]
         response_msg.actions = actions
-        
-        # Attach rich elements if any RAG occurred
         rag_content = cl.user_session.get("last_rag_result")
         elements = []
         if rag_content:
@@ -1198,13 +1371,15 @@ async def on_regenerate(action: cl.Action):
             sources = cl.user_session.get("last_rag_sources") or []
             for src in sources:
                 src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
-                if os.path.exists(src_path):
-                    if src.lower().endswith(".pdf"):
-                        elements.append(cl.Pdf(name=src, path=src_path, display="side"))
+                if os.path.exists(src_path) and src.lower().endswith(".pdf"):
+                    elements.append(cl.Pdf(name=src, path=src_path, display="side"))
             cl.user_session.set("last_rag_result", None)
             cl.user_session.set("last_rag_sources", None)
-        
-        response_msg.elements = elements
+        if elements:
+            response_msg.elements = elements
+        chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
+        if chat_profile_name == "Voice Mode":
+            await add_voice_to_response(response_msg, full_response)
         await response_msg.update()
     except Exception as e:
         await cl.ErrorMessage(content=f"⚠️ Failed to regenerate answer: {str(e)}").send()
@@ -1216,7 +1391,6 @@ async def on_search_web_instead(action: cl.Action):
         history = cl.user_session.get("message_history", [])
         if not history:
             return
-        
         user_query = ""
         for msg in reversed(history):
             if msg.get("role") == "user":
@@ -1224,42 +1398,41 @@ async def on_search_web_instead(action: cl.Action):
                 if isinstance(user_query, list):
                     user_query = next((c.get("text", "") for c in user_query if c.get("type") == "text"), "")
                 break
-        
         if not user_query:
             await cl.Message(content="Could not find the last query to search the web instead.").send()
             return
-        
+
         async with cl.Step(name="Searching the Web...", type="tool") as step:
             step.input = {"query": user_query}
-            web_results = perform_web_search(user_query)
+            # FIX P1-9: Use async wrapper
+            web_results = await perform_web_search_async(user_query)
             step.output = web_results
-        
+
         history.append({
             "role": "system",
             "content": f"[SYSTEM: The user clicked 'Search Web Instead'. Here are the live web results for '{user_query}':\n{web_results}\nSynthesize these results into a clear answer.]"
         })
-        
         temperature = cl.user_session.get("temperature", 0.7)
-        completion, _ = await call_llm_with_fallback(history, temperature=temperature)
-        
+        selected_model = cl.user_session.get("model")
+        completion, _ = await call_llm_with_fallback(history, temperature=temperature, requested_model=selected_model)
         response_msg = cl.Message(content="")
         await response_msg.send()
-        
         full_response = ""
         for chunk in completion:
-            text = getattr(chunk.choices[0].delta, "content", "") or ""
-            full_response += text
-            await response_msg.stream_token(text)
-        
+            text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
+            full_response += text_tok
+            await response_msg.stream_token(text_tok)
         history.append({"role": "assistant", "content": full_response})
-        cl.user_session.set("message_history", history)
-        
+        cl.user_session.set("message_history", sanitize_history_for_storage(history))
         actions = [
             cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
             cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
             cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
         ]
         response_msg.actions = actions
+        chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
+        if chat_profile_name == "Voice Mode":
+            await add_voice_to_response(response_msg, full_response)
         await response_msg.update()
     except Exception as e:
         await cl.ErrorMessage(content=f"⚠️ Failed to search the web: {str(e)}").send()
@@ -1272,7 +1445,7 @@ async def on_verify_citations(action: cl.Action):
         if not sources:
             await cl.Message(content="✅ **Citations Verified**: All context segments sourced from uploaded workspace documents.").send()
         else:
-            await cl.Message(content=f"✅ **Citations Verified**: Sourced successfully from: {', '.join(sources)}").send()
+            await cl.Message(content=f"✅ **Citations Verified**: Sourced from: {', '.join(sources)}").send()
     except Exception as e:
         await cl.ErrorMessage(content=f"⚠️ Failed to verify citations: {str(e)}").send()
 
@@ -1281,7 +1454,8 @@ async def on_verify_citations(action: cl.Action):
 async def execute_resume_session(action: cl.Action):
     session_id = action.payload.get("session_id")
     try:
-        thread = await cl_data._data_layer.get_thread(session_id)
+        layer = cl_data.get_data_layer()
+        thread = await layer.get_thread(session_id)
         if thread:
             history = [{"role": msg.role, "content": msg.content} for msg in thread.steps if msg.type in ("user_message", "assistant_message")]
             cl.user_session.set("message_history", history)
