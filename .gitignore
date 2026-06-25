@@ -24,10 +24,10 @@ chainlit.db-shm
 *.db
 
 # Data & AI Assets
-models/
+#models/
 data/
 vector_store/
 
 # Chainlit Runtime Config & Workspace Uploads
-.chainlit/
+#.chainlit/
 public/elements/
