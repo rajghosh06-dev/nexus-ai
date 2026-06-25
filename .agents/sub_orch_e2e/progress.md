@@ -1,0 +1,11 @@
+- [x] Start heartbeat cron
+- [x] Decompose milestones
+- [x] Run iteration loop for Milestone 1 (verify_theme.py)
+  - [x] Explorer recommendations
+  - [x] Worker implementation
+  - [ ] Reviewer validation
+  - [ ] Challenger verification
+  - [ ] Auditor integrity check
+- [ ] Run verification tests
+- [ ] Publish TEST_READY.md
+- [ ] Report progress and handoff to parent

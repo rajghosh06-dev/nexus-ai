@@ -1,171 +1,1512 @@
-/* =========================================
-   GLOBAL SCROLLBAR OVERHAUL (Custom Theme)
-   ========================================= */
-/* 1. Width of the scrollbar */
-::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+/* ============================================================
+   NexusAI — Liquid Glass Frost Theme v2.0 for Chainlit 1.3.x
+   ============================================================
+   Strategy:
+   - Stable MUI class names, semantic HTML tags, data-* attrs
+   - No brittle hashed class names
+   - Full glass-morphism with aurora gradient backdrop
+   - Fixes textarea bug: was invisible due to bg=transparent
+     over dark surface with no contrast. Now explicit glassy.
+   ============================================================ */
+
+/* ── Google Fonts ─────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&family=JetBrains+Mono:wght@400;500&family=Orbitron:wght@600;700;900&display=swap');
+
+/* ── Design Tokens ────────────────────────────────────────── */
+:root {
+    /* Core palette */
+    --nx-cyan:          #00d4ff;
+    --nx-cyan-mid:      #00b8dd;
+    --nx-cyan-dim:      #0096bb;
+    --nx-cyan-glow:     rgba(0, 212, 255, 0.20);
+    --nx-cyan-soft:     rgba(0, 212, 255, 0.08);
+    --nx-violet:        #7c3aed;
+    --nx-violet-glow:   rgba(124, 58, 237, 0.20);
+    --nx-violet-soft:   rgba(124, 58, 237, 0.08);
+    --nx-pink:          #f43f8a;
+
+    /* Backgrounds */
+    --nx-bg:            #070b14;
+    --nx-bg-mid:        #0a1020;
+    --nx-surface:       rgba(13, 20, 38, 0.72);
+    --nx-glass:         rgba(12, 18, 36, 0.65);
+    --nx-glass-strong:  rgba(8, 14, 28, 0.90);
+
+    /* Borders */
+    --nx-border:        rgba(0, 212, 255, 0.14);
+    --nx-border-soft:   rgba(0, 212, 255, 0.08);
+    --nx-border-hover:  rgba(0, 212, 255, 0.32);
+    --nx-border-focus:  rgba(0, 212, 255, 0.55);
+
+    /* Text */
+    --nx-text:          #f0f6ff;
+    --nx-muted:         #8ba3c7;
+    --nx-dim:           #4e657e;
+
+    /* Effects */
+    --nx-radius:        20px;
+    --nx-radius-md:     14px;
+    --nx-radius-sm:     10px;
+    --nx-shadow:        0 8px 32px rgba(0,0,0,0.50), 0 0 0 1px rgba(255,255,255,0.03);
+    --nx-shadow-sm:     0 4px 16px rgba(0,0,0,0.35);
+    --nx-glow-cyan:     0 0 28px rgba(0, 212, 255, 0.14);
+    --nx-glow-violet:   0 0 28px rgba(124, 58, 237, 0.14);
+
+    /* Blur values */
+    --nx-blur:          blur(24px) saturate(1.7);
+    --nx-blur-strong:   blur(32px) saturate(1.8);
+    --nx-blur-light:    blur(14px) saturate(1.4);
+
+    /* Aurora defaults (Dark Mode) */
+    --nx-aurora-1: rgba(0, 212, 255, 0.10);
+    --nx-aurora-2: rgba(124, 58, 237, 0.10);
+    --nx-aurora-3: rgba(0, 140, 210, 0.04);
+    --nx-grid: rgba(0, 212, 255, 0.025);
 }
 
-/* 2. Track background (The long strip) */
-html[data-theme='dark'] ::-webkit-scrollbar-track {
+[data-theme="light"], .light, [data-color-mode="light"] {
+    --nx-bg:            #f5f7fa;
+    --nx-bg-mid:        #e2e8f0;
+    --nx-surface:       rgba(255, 255, 255, 0.72);
+    --nx-glass:         rgba(255, 255, 255, 0.65);
+    --nx-glass-strong:  rgba(255, 255, 255, 0.90);
+
+    --nx-border:        rgba(0, 0, 0, 0.14);
+    --nx-border-soft:   rgba(0, 0, 0, 0.08);
+    --nx-border-hover:  rgba(0, 0, 0, 0.22);
+    --nx-border-focus:  rgba(0, 0, 0, 0.35);
+
+    --nx-text:          #1a202c;
+    --nx-muted:         #4a5568;
+    --nx-dim:           #718096;
+
+    --nx-glow-cyan:     0 0 28px rgba(0, 212, 255, 0.3);
+    --nx-glow-violet:   0 0 28px rgba(124, 58, 237, 0.3);
+
+    /* Aurora defaults (Light Mode) */
+    --nx-aurora-1: rgba(0, 212, 255, 0.05);
+    --nx-aurora-2: rgba(124, 58, 237, 0.05);
+    --nx-aurora-3: rgba(0, 140, 210, 0.02);
+    --nx-grid: rgba(0, 0, 0, 0.025);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 1 — Full Page Background with Aurora
+   ══════════════════════════════════════════════════════════ */
+
+html, body, #root {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+    background: var(--nx-bg) !important;
+    color: var(--nx-text) !important;
+    min-height: 100vh !important;
+}
+
+/* Animated Aurora gradient orbs */
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    background:
+        radial-gradient(ellipse 70% 50% at 12% 18%, var(--nx-aurora-1) 0%, transparent 55%),
+        radial-gradient(ellipse 60% 45% at 88% 78%, var(--nx-aurora-2) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 40% at 50% 50%, var(--nx-aurora-3) 0%, transparent 60%),
+        var(--nx-bg);
+    pointer-events: none;
+    animation: nx-aurora-shift 18s ease-in-out infinite alternate;
+}
+
+@keyframes nx-aurora-shift {
+    0%   { filter: hue-rotate(0deg) brightness(1); }
+    50%  { filter: hue-rotate(15deg) brightness(1.05); }
+    100% { filter: hue-rotate(-10deg) brightness(0.97); }
+}
+
+/* Perspective grid overlay */
+body::after {
+    content: '';
+    position: fixed;
+    inset: -50%;
+    z-index: -1;
+    background-image:
+        linear-gradient(var(--nx-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--nx-grid) 1px, transparent 1px);
+    background-size: 56px 56px;
+    transform: perspective(700px) rotateX(55deg) translateY(-5%);
+    opacity: 0.50;
+    pointer-events: none;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 2 — MUI Paper (universal surface)
+   ══════════════════════════════════════════════════════════ */
+
+.MuiPaper-root {
+    background-color: rgba(10, 16, 32, 0.78) !important;
+    backdrop-filter: var(--nx-blur) !important;
+    -webkit-backdrop-filter: var(--nx-blur) !important;
+    color: var(--nx-text) !important;
+    box-shadow: var(--nx-shadow) !important;
+    border: 1px solid var(--nx-border-soft) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 3 — Sidebar (MUI Drawer)
+   ══════════════════════════════════════════════════════════ */
+
+.MuiDrawer-root {
+    position: fixed !important;
+    z-index: 10 !important;
+}
+
+.MuiDrawer-root .MuiDrawer-paper {
+    background: rgba(6, 10, 22, 0.92) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    -webkit-backdrop-filter: var(--nx-blur-strong) !important;
+    border-right: 1px solid var(--nx-border) !important;
+    box-shadow: 4px 0 40px rgba(0,0,0,0.55), inset -1px 0 0 rgba(0,212,255,0.06) !important;
+}
+
+nav[aria-label="threads"],
+aside {
+    background: transparent !important;
+    border: none !important;
+}
+
+/* Thread list items */
+.MuiList-root .MuiListItem-root,
+.MuiList-root .MuiButtonBase-root {
+    border-radius: var(--nx-radius-sm) !important;
+    margin: 2px 8px !important;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.15s ease !important;
+    border: 1px solid transparent !important;
+    color: var(--nx-muted) !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 13px !important;
+}
+
+.MuiList-root .MuiListItem-root:hover,
+.MuiList-root .MuiButtonBase-root:hover {
+    background: rgba(0, 212, 255, 0.07) !important;
+    border-color: var(--nx-border) !important;
+    color: var(--nx-text) !important;
+    transform: translateX(2px) !important;
+}
+
+.MuiList-root .Mui-selected {
+    background: rgba(0, 212, 255, 0.10) !important;
+    border-color: rgba(0, 212, 255, 0.22) !important;
+    box-shadow: inset 3px 0 0 var(--nx-cyan) !important;
+    color: var(--nx-text) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 4 — Header / Topbar
+   ══════════════════════════════════════════════════════════ */
+
+header {
+    background: rgba(5, 9, 18, 0.88) !important;
+    backdrop-filter: var(--nx-blur) !important;
+    -webkit-backdrop-filter: var(--nx-blur) !important;
+    border-bottom: 1px solid var(--nx-border) !important;
+    box-shadow: 0 1px 0 rgba(0,212,255,0.08), 0 4px 20px rgba(0,0,0,0.40) !important;
+    color: var(--nx-text) !important;
+}
+
+header h1,
+header h2,
+header [class*="app-name"],
+header [class*="AppName"] {
+    font-family: 'Orbitron', 'Inter', sans-serif !important;
+    font-weight: 700 !important;
+    background: linear-gradient(135deg, #e0f2fe 0%, #00d4ff 40%, #a78bfa 100%) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+    letter-spacing: 0.04em !important;
+    filter: drop-shadow(0 0 8px rgba(0,212,255,0.25)) !important;
+}
+
+/* Chat profile selector in header */
+header button,
+header [role="button"] {
+    color: var(--nx-text) !important;
+    transition: color 0.2s ease !important;
+}
+
+header button:hover,
+header [role="button"]:hover {
+    color: var(--nx-cyan) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 5 — Main Chat Area Layout
+   ══════════════════════════════════════════════════════════ */
+
+main, [role="main"] {
     background: transparent !important;
 }
-html[data-theme='light'] ::-webkit-scrollbar-track {
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 6 — Chat Input / Textarea (THE MAIN FIX)
+   ══════════════════════════════════════════════════════════
+
+   ROOT CAUSE of the textarea visual bug:
+   - Chainlit renders the chat input inside a MuiPaper container
+   - The textarea itself has a near-transparent or very dark bg
+   - When combined with the dark page bg, it becomes invisible/flat
+   - The container border was only 1px rgba(255,255,255,0.05) — invisible
+   - No backdrop-filter was applied, so it blended into the page
+   - FIX: Apply strong glass effect + visible border + glow on focus
+   ══════════════════════════════════════════════════════════ */
+
+/* The outer input container / footer */
+footer,
+[class*="input-box"],
+[class*="InputBox"],
+[class*="chat-input"],
+[class*="ChatInput"] {
     background: transparent !important;
+    border-top: none !important;
+    padding: 0 !important;
 }
 
-/* 3. The Thumb (The draggable slider handle) */
-html[data-theme='dark'] ::-webkit-scrollbar-thumb {
-    background: rgba(0, 240, 255, 0.2) !important;
-    border-radius: 10px;
-}
-html[data-theme='light'] ::-webkit-scrollbar-thumb {
-    background: rgba(0, 150, 180, 0.2) !important;
-    border-radius: 10px;
-}
-
-/* 4. Thumb Hover states */
-html[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 240, 255, 0.6) !important;
-}
-html[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
-    background: rgba(0, 150, 180, 0.6) !important;
+/* Chainlit wraps the whole input area in a MuiPaper at the bottom */
+/* Target the input pill container specifically */
+.MuiPaper-root:has(textarea),
+.MuiPaper-root:has([contenteditable="true"]) {
+    background: rgba(10, 17, 34, 0.85) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    -webkit-backdrop-filter: var(--nx-blur-strong) !important;
+    border: 1px solid rgba(0, 212, 255, 0.20) !important;
+    border-radius: var(--nx-radius) !important;
+    box-shadow:
+        0 8px 32px rgba(0,0,0,0.50),
+        0 0 0 1px rgba(255,255,255,0.04),
+        0 0 24px rgba(0,212,255,0.06) !important;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
 }
 
-
-/* =========================================
-   LIQUID GLASS FROST THEME
-   ========================================= */
-
-/* BACKGROUNDS */
-html[data-theme='dark'] body {
-    background: radial-gradient(circle at 50% 0%, #0c1824 0%, #050a0f 100%) !important;
-    color: #e2e8f0 !important;
+.MuiPaper-root:has(textarea):focus-within,
+.MuiPaper-root:has([contenteditable="true"]):focus-within {
+    border-color: rgba(0, 212, 255, 0.45) !important;
+    box-shadow:
+        0 8px 32px rgba(0,0,0,0.55),
+        0 0 0 1px rgba(255,255,255,0.05),
+        0 0 40px rgba(0,212,255,0.12),
+        inset 0 0 20px rgba(0,212,255,0.04) !important;
 }
 
-html[data-theme='light'] body {
-    background: radial-gradient(circle at 50% 0%, #f0f8ff 0%, #e0eaf5 100%) !important;
-    color: #1e293b !important;
-}
-
-/* GLASSMORPHISM ON PAPER ELEMENTS */
-html[data-theme='dark'] .MuiPaper-root {
-    background: rgba(15, 23, 34, 0.5) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(0, 240, 255, 0.1) !important;
-}
-
-html[data-theme='light'] .MuiPaper-root {
-    background: rgba(255, 255, 255, 0.6) !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    border: 1px solid rgba(0, 150, 180, 0.1) !important;
-}
-
-/* FIX: Ensure dropdown menus are opaque so text is readable */
-html[data-theme='dark'] .MuiMenu-paper {
-    background: #0f1722 !important;
-    backdrop-filter: none !important;
-    border: 1px solid #00f0ff !important;
-}
-
-html[data-theme='light'] .MuiMenu-paper {
-    background: #ffffff !important;
-    backdrop-filter: none !important;
-    border: 1px solid #0096b4 !important;
-}
-
-/* CHAT INPUT AREA */
-html[data-theme='light'] .MuiInputBase-root,
-html[data-theme='light'] div[role="presentation"] {
-    background-color: rgba(255, 255, 255, 0.8) !important;
-    border: 1px solid rgba(0, 150, 180, 0.3) !important;
-    box-shadow: 0 4px 30px rgba(0, 150, 180, 0.1) !important;
-    backdrop-filter: blur(8px) !important;
-}
-
-html[data-theme='light'] .MuiInputBase-root:focus-within {
-    box-shadow: 0 0 15px rgba(0, 200, 255, 0.4) !important;
-    border-color: #00d2ff !important;
-}
-
-html[data-theme='dark'] .MuiInputBase-root,
-html[data-theme='dark'] div[role="presentation"] {
-    background-color: rgba(10, 15, 25, 0.7) !important;
-    border: 1px solid rgba(0, 240, 255, 0.2) !important;
-    box-shadow: 0 4px 30px rgba(0, 240, 255, 0.05) !important;
-    backdrop-filter: blur(8px) !important;
-}
-
-html[data-theme='dark'] .MuiInputBase-root:focus-within {
-    box-shadow: 0 0 15px rgba(0, 240, 255, 0.3) !important;
-    border-color: #00f0ff !important;
-    transition: all 0.3s ease-in-out;
-}
-
-/* =========================================
-   ACTION BUTTONS & STARTERS: Liquid Tiles
-   ========================================= */
-.MuiStack-root .MuiButton-root,
-.cl-starter {
-    padding: 14px 24px !important;
-    margin: 8px 12px 8px 0 !important;
-    border-radius: 12px !important;
-    text-transform: none !important;
+/* THE TEXTAREA ITSELF */
+textarea,
+[contenteditable="true"] {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    color: var(--nx-text) !important;
+    font-family: 'Inter', sans-serif !important;
     font-size: 15px !important;
+    font-weight: 400 !important;
+    line-height: 1.65 !important;
+    transition: none !important;
+    caret-color: var(--nx-cyan) !important;
+    outline: none !important;
+    resize: none !important;
+    box-shadow: none !important;
+    padding: 14px 16px !important;
+    min-height: 48px !important;
+    max-height: 240px !important;
+    overflow-y: auto !important;
+}
+
+textarea::placeholder,
+[contenteditable="true"][data-placeholder]::before {
+    color: rgba(139, 163, 199, 0.55) !important;
+    font-style: italic !important;
+}
+
+textarea:focus,
+[contenteditable="true"]:focus {
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    border: none !important;
+}
+
+/* Input toolbar row (attach, settings, tools buttons) */
+[class*="input-toolbar"],
+[class*="InputToolbar"],
+[class*="toolbar"] {
+    border-top: 1px solid rgba(0, 212, 255, 0.08) !important;
+    background: rgba(6, 11, 22, 0.40) !important;
+    border-radius: 0 0 var(--nx-radius) var(--nx-radius) !important;
+    padding: 6px 12px !important;
+}
+
+/* Send button */
+button[type="submit"],
+[aria-label="Send message"],
+[aria-label="send message"] {
+    background: linear-gradient(135deg, #00b8dd, #7c3aed) !important;
+    border: none !important;
+    border-radius: 12px !important;
+    box-shadow: 0 4px 16px rgba(0,212,255,0.28) !important;
+    color: #fff !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease !important;
+    width: 36px !important;
+    height: 36px !important;
+}
+
+button[type="submit"]:hover,
+[aria-label="Send message"]:hover {
+    transform: translateY(-1px) scale(1.06) !important;
+    box-shadow: 0 6px 24px rgba(0,212,255,0.38) !important;
+    filter: brightness(1.1) !important;
+}
+
+button[type="submit"]:active {
+    transform: translateY(0) scale(0.97) !important;
+}
+
+/* Icon buttons in the toolbar */
+.MuiIconButton-root {
+    color: var(--nx-muted) !important;
+    border-radius: var(--nx-radius-sm) !important;
+    transition: color 0.2s, background 0.2s, transform 0.15s !important;
+}
+
+.MuiIconButton-root:hover {
+    color: var(--nx-cyan) !important;
+    background: rgba(0,212,255,0.08) !important;
+    transform: scale(1.08) !important;
+}
+
+/* Disclaimer text below input */
+[class*="disclaimer"],
+[class*="Disclaimer"],
+footer p,
+footer span {
+    color: var(--nx-dim) !important;
+    font-size: 11px !important;
+    font-family: 'Inter', sans-serif !important;
+    text-align: center !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 7 — Welcome / Greeting Area
+   ══════════════════════════════════════════════════════════ */
+
+/* Welcome screen centering container */
+[class*="welcome"],
+[class*="Welcome"],
+[class*="empty-state"],
+[class*="EmptyState"] {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    padding: 40px 20px !important;
+}
+
+/* Starters grid centering */
+[class*="starters"],
+[class*="Starters"],
+[class*="starter-grid"],
+[class*="StarterGrid"] {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
+    gap: 12px !important;
+    max-width: 700px !important;
+    margin: 0 auto !important;
+    justify-items: center !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 8 — Message Bubbles
+   ══════════════════════════════════════════════════════════ */
+
+@keyframes nx-fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes nx-shimmer {
+    0%   { background-position: -200% center; }
+    100% { background-position: 200% center; }
+}
+
+/* All messages fade in */
+[class*="message"],
+[class*="Message"] {
+    animation: nx-fade-in 0.3s ease forwards !important;
+}
+
+/* User message bubble — right-aligned with cyan-violet gradient */
+[class*="user-message"],
+[class*="UserMessage"],
+[data-role="user"] [class*="message"] {
+    background: linear-gradient(135deg, rgba(0,184,221,0.16), rgba(124,58,237,0.12)) !important;
+    border: 1px solid rgba(0,212,255,0.20) !important;
+    border-radius: 20px 20px 4px 20px !important;
+    backdrop-filter: var(--nx-blur-light) !important;
+    -webkit-backdrop-filter: var(--nx-blur-light) !important;
+    box-shadow: var(--nx-shadow-sm), 0 0 16px rgba(0,212,255,0.06) !important;
+    color: var(--nx-text) !important;
+    padding: 12px 18px !important;
+    max-width: 78% !important;
+}
+
+/* AI / assistant message bubble — left-aligned glass dark card */
+[class*="assistant-message"],
+[class*="AssistantMessage"],
+[class*="ai-message"],
+[class*="AiMessage"],
+[class*="bot-message"],
+[class*="BotMessage"],
+[data-role="assistant"] [class*="message"] {
+    background: rgba(10, 17, 34, 0.76) !important;
+    border: 1px solid rgba(0,212,255,0.12) !important;
+    border-radius: 4px 20px 20px 20px !important;
+    backdrop-filter: var(--nx-blur) !important;
+    -webkit-backdrop-filter: var(--nx-blur) !important;
+    box-shadow: var(--nx-glow-cyan), var(--nx-shadow) !important;
+    color: var(--nx-text) !important;
+    padding: 14px 18px !important;
+    position: relative !important;
+    overflow: hidden !important;
+    max-width: 82% !important;
+}
+
+/* Top shimmer line on AI messages */
+[class*="assistant-message"]::before,
+[class*="AssistantMessage"]::before,
+[class*="ai-message"]::before,
+[class*="AiMessage"]::before {
+    content: '' !important;
+    position: absolute !important;
+    top: 0; left: 0; right: 0 !important;
+    height: 1px !important;
+    background: linear-gradient(90deg, transparent 0%, var(--nx-cyan) 40%, var(--nx-violet) 70%, transparent 100%) !important;
+    opacity: 0.50 !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 9 — Step / Chain of Thought
+   ══════════════════════════════════════════════════════════ */
+
+[class*="step"],
+[class*="Step"] {
+    background: rgba(8,13,28,0.75) !important;
+    border: 1px solid rgba(0,212,255,0.08) !important;
+    border-left: 3px solid var(--nx-violet) !important;
+    border-radius: 0 var(--nx-radius-sm) var(--nx-radius-sm) 0 !important;
+    backdrop-filter: var(--nx-blur-light) !important;
+    color: var(--nx-muted) !important;
+    margin: 6px 0 !important;
+    animation: nx-fade-in 0.25s ease forwards !important;
+    font-size: 13px !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 10 — MUI Buttons
+   ══════════════════════════════════════════════════════════ */
+
+.MuiButton-root {
+    font-family: 'Inter', sans-serif !important;
+    border-radius: var(--nx-radius-sm) !important;
+    text-transform: none !important;
     font-weight: 500 !important;
-    min-width: 250px !important;
-    justify-content: flex-start !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    backdrop-filter: blur(8px) !important;
+    letter-spacing: 0.01em !important;
+    transition: all 0.2s ease !important;
 }
 
-/* Light Mode Tile Styling */
-html[data-theme='light'] .MuiStack-root .MuiButton-root,
-html[data-theme='light'] .cl-starter {
-    background-color: rgba(255, 255, 255, 0.7) !important;
-    border: 1px solid rgba(0, 150, 180, 0.2) !important;
-    color: #1e293b !important;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.03) !important;
+.MuiButton-contained {
+    background: linear-gradient(135deg, var(--nx-cyan-mid), var(--nx-violet)) !important;
+    color: #fff !important;
+    border: none !important;
+    box-shadow: 0 4px 14px rgba(0,212,255,0.22) !important;
 }
 
-/* Dark Mode Tile Styling */
-html[data-theme='dark'] .MuiStack-root .MuiButton-root,
-html[data-theme='dark'] .cl-starter {
-    background-color: rgba(15, 25, 40, 0.6) !important;
-    border: 1px solid rgba(0, 240, 255, 0.2) !important;
-    color: #e2e8f0 !important;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1) !important;
+.MuiButton-contained:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 6px 22px rgba(0,212,255,0.32) !important;
+    filter: brightness(1.08) !important;
 }
 
-/* Tile Hover Glow Effect */
-.MuiStack-root .MuiButton-root:hover,
-.cl-starter:hover {
+.MuiButton-outlined {
+    border-color: var(--nx-border) !important;
+    color: var(--nx-text) !important;
+}
+
+.MuiButton-outlined:hover {
+    border-color: var(--nx-cyan-mid) !important;
+    background: var(--nx-cyan-soft) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 11 — Code Blocks
+   ══════════════════════════════════════════════════════════ */
+
+pre, code, kbd, .hljs {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace !important;
+}
+
+pre {
+    background: rgba(4, 8, 18, 0.96) !important;
+    border: 1px solid rgba(0,212,255,0.10) !important;
+    border-radius: var(--nx-radius-sm) !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.04) !important;
+    padding: 18px 20px !important;
+    overflow-x: auto !important;
+    position: relative !important;
+}
+
+/* Top bar gradient accent on code blocks */
+pre::before {
+    content: '' !important;
+    position: absolute !important;
+    top: 0; left: 0; right: 0 !important;
+    height: 2px !important;
+    background: linear-gradient(90deg, var(--nx-cyan), var(--nx-violet)) !important;
+    border-radius: var(--nx-radius-sm) var(--nx-radius-sm) 0 0 !important;
+    opacity: 0.60 !important;
+}
+
+code:not(pre code) {
+    background: rgba(0,212,255,0.09) !important;
+    border: 1px solid rgba(0,212,255,0.16) !important;
+    border-radius: 5px !important;
+    padding: 2px 6px !important;
+    color: var(--nx-cyan) !important;
+    font-size: 0.87em !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 12 — MUI Menus, Popovers & Tooltips
+   ══════════════════════════════════════════════════════════ */
+
+.MuiMenu-paper,
+.MuiPopover-paper {
+    background: rgba(7, 12, 26, 0.97) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius-md) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    -webkit-backdrop-filter: var(--nx-blur-strong) !important;
+    box-shadow: var(--nx-shadow), var(--nx-glow-cyan) !important;
+    color: var(--nx-text) !important;
+}
+
+.MuiTooltip-tooltip {
+    background: rgba(8, 14, 30, 0.97) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: 8px !important;
+    color: var(--nx-text) !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 12px !important;
+    box-shadow: var(--nx-shadow-sm) !important;
+}
+
+.MuiMenuItem-root {
+    color: var(--nx-muted) !important;
+    border-radius: 8px !important;
+    margin: 2px 4px !important;
+    transition: all 0.18s ease !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 13.5px !important;
+}
+
+.MuiMenuItem-root:hover {
+    background: rgba(0,212,255,0.08) !important;
+    color: var(--nx-text) !important;
+}
+
+.MuiMenuItem-root.Mui-selected {
+    background: rgba(0,212,255,0.12) !important;
+    color: var(--nx-cyan) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 13 — MUI Input Fields
+   ══════════════════════════════════════════════════════════ */
+
+.MuiOutlinedInput-root,
+.MuiInputBase-root {
+    background: rgba(10,18,36,0.72) !important;
+    border-radius: var(--nx-radius-sm) !important;
+    color: var(--nx-text) !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+.MuiOutlinedInput-notchedOutline {
+    border-color: var(--nx-border) !important;
+    transition: border-color 0.2s ease !important;
+}
+
+.MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline {
+    border-color: var(--nx-cyan-dim) !important;
+}
+
+.MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+    border-color: var(--nx-cyan-mid) !important;
+    box-shadow: 0 0 0 3px var(--nx-cyan-glow) !important;
+}
+
+.MuiInputLabel-root {
+    color: var(--nx-muted) !important;
+    font-family: 'Inter', sans-serif !important;
+}
+
+.MuiInputLabel-root.Mui-focused {
+    color: var(--nx-cyan) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 14 — Chips, Dialogs, Backdrops
+   ══════════════════════════════════════════════════════════ */
+
+.MuiChip-root {
+    background: rgba(0,212,255,0.10) !important;
+    border: 1px solid rgba(0,212,255,0.18) !important;
+    color: var(--nx-text) !important;
+    border-radius: 8px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 12px !important;
+    transition: all 0.18s ease !important;
+}
+
+.MuiChip-root:hover {
+    background: rgba(0,212,255,0.16) !important;
+    border-color: rgba(0,212,255,0.30) !important;
+}
+
+.MuiDialog-paper {
+    background: rgba(7, 12, 28, 0.96) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: 22px !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    -webkit-backdrop-filter: var(--nx-blur-strong) !important;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.65), var(--nx-glow-cyan) !important;
+    color: var(--nx-text) !important;
+}
+
+.MuiBackdrop-root {
+    background: rgba(3, 6, 16, 0.70) !important;
+    backdrop-filter: blur(6px) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 15 — Action Buttons (cl.Action)
+   ══════════════════════════════════════════════════════════ */
+
+[class*="action-button"],
+[class*="ActionButton"] {
+    background: rgba(10,17,34,0.75) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: 9px !important;
+    color: var(--nx-muted) !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    transition: all 0.2s ease !important;
+    backdrop-filter: var(--nx-blur-light) !important;
+    padding: 5px 12px !important;
+}
+
+[class*="action-button"]:hover,
+[class*="ActionButton"]:hover {
+    border-color: var(--nx-cyan-mid) !important;
+    color: var(--nx-cyan) !important;
+    background: rgba(0,212,255,0.08) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 14px var(--nx-cyan-glow) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 16 — Chat Starters
+   ══════════════════════════════════════════════════════════ */
+
+[class*="starter"],
+[class*="Starter"] {
+    background: var(--nx-glass) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius) !important;
+    backdrop-filter: var(--nx-blur) !important;
+    -webkit-backdrop-filter: var(--nx-blur) !important;
+    color: var(--nx-text) !important;
+    transition: all 0.25s ease !important;
+    text-align: left !important;
+    padding: 14px 18px !important;
+}
+
+[class*="starter"]:hover,
+[class*="Starter"]:hover {
+    border-color: rgba(0,212,255,0.32) !important;
+    background: rgba(0,212,255,0.07) !important;
     transform: translateY(-3px) !important;
+    box-shadow: 0 10px 28px rgba(0,212,255,0.14) !important;
 }
 
-html[data-theme='light'] .MuiStack-root .MuiButton-root:hover,
-html[data-theme='light'] .cl-starter:hover {
-    border-color: #00c3ff !important;
-    box-shadow: 0 8px 20px rgba(0, 195, 255, 0.2) !important;
-    background-color: rgba(255, 255, 255, 0.9) !important;
+/* ══════════════════════════════════════════════════════════
+   LAYER 17 — File / Element Cards (Multi-Modal)
+   ══════════════════════════════════════════════════════════ */
+
+[class*="element"],
+[class*="Element"],
+[class*="file-card"],
+[class*="FileCard"],
+[class*="image-element"],
+[class*="ImageElement"],
+[class*="audio-element"],
+[class*="AudioElement"],
+[class*="video-element"],
+[class*="VideoElement"],
+[class*="pdf-element"],
+[class*="PdfElement"] {
+    background: rgba(10,18,36,0.82) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius-md) !important;
+    backdrop-filter: var(--nx-blur-light) !important;
+    transition: all 0.2s ease !important;
+    overflow: hidden !important;
 }
 
-html[data-theme='dark'] .MuiStack-root .MuiButton-root:hover,
-html[data-theme='dark'] .cl-starter:hover {
-    border-color: #00f0ff !important;
-    box-shadow: 0 8px 20px rgba(0, 240, 255, 0.25) !important;
-    background-color: rgba(20, 35, 55, 0.8) !important;
+[class*="element"]:hover,
+[class*="file-card"]:hover {
+    border-color: var(--nx-border-hover) !important;
+    box-shadow: 0 6px 24px rgba(0,212,255,0.12) !important;
+    transform: translateY(-2px) !important;
 }
 
-/* Ensure avatars follow theme */
-.cl-avatar {
-    border: 1px solid rgba(0, 240, 255, 0.3);
-    box-shadow: 0 0 10px rgba(0, 240, 255, 0.1);
+/* Image elements - proper sizing */
+[class*="image-element"] img,
+[class*="ImageElement"] img {
+    border-radius: var(--nx-radius-sm) !important;
+    max-width: 100% !important;
+    border: 1px solid var(--nx-border) !important;
 }
-html[data-theme='light'] .cl-avatar {
-    border-color: rgba(0, 150, 180, 0.3);
-    box-shadow: 0 0 10px rgba(0, 150, 180, 0.1);
+
+/* Audio player styling */
+audio {
+    background: rgba(8,14,28,0.90) !important;
+    border-radius: var(--nx-radius-sm) !important;
+    border: 1px solid var(--nx-border) !important;
+    outline: none !important;
+    width: 100% !important;
+    accent-color: var(--nx-cyan) !important;
+}
+
+/* Video player styling */
+video {
+    border-radius: var(--nx-radius-md) !important;
+    border: 1px solid var(--nx-border) !important;
+    max-width: 100% !important;
+}
+
+/* File upload preview area */
+[class*="file-upload"],
+[class*="FileUpload"],
+[class*="upload-preview"],
+[class*="UploadPreview"] {
+    background: rgba(10,17,34,0.80) !important;
+    border: 2px dashed var(--nx-border) !important;
+    border-radius: var(--nx-radius) !important;
+    transition: all 0.2s ease !important;
+}
+
+[class*="file-upload"]:hover,
+[class*="FileUpload"]:hover {
+    border-color: var(--nx-cyan-mid) !important;
+    background: rgba(0,212,255,0.05) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 18 — Feedback, Notifications, Commands
+   ══════════════════════════════════════════════════════════ */
+
+[class*="feedback"],
+[class*="Feedback"],
+[class*="thumb"] {
+    border-radius: 8px !important;
+    color: var(--nx-muted) !important;
+    transition: all 0.2s ease !important;
+}
+
+[class*="feedback"]:hover,
+[class*="thumb"]:hover {
+    background: rgba(0,212,255,0.08) !important;
+    color: var(--nx-cyan) !important;
+}
+
+[role="alert"],
+[class*="toast"],
+[class*="Toast"] {
+    background: rgba(10,17,34,0.96) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius-md) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    box-shadow: var(--nx-shadow) !important;
+    color: var(--nx-text) !important;
+}
+
+/* Slash command autocomplete */
+[class*="command"],
+[class*="Command"],
+[class*="autocomplete"] {
+    background: rgba(5, 9, 22, 0.98) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius-md) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    box-shadow: var(--nx-shadow), var(--nx-glow-cyan) !important;
+    color: var(--nx-text) !important;
+}
+
+[class*="command-item"]:hover,
+[class*="CommandItem"]:hover {
+    background: rgba(0,212,255,0.08) !important;
+    color: var(--nx-cyan) !important;
+}
+
+/* Settings panel */
+[class*="settings"],
+[class*="Settings"] {
+    background: rgba(7,12,26,0.96) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    color: var(--nx-text) !important;
+}
+
+/* Sliders / switches / checkboxes */
+[type="range"],
+[class*="slider"],
+[class*="switch"],
+[class*="Switch"],
+[class*="checkbox"] {
+    accent-color: var(--nx-cyan) !important;
+}
+
+.MuiSwitch-track {
+    background-color: rgba(0,212,255,0.25) !important;
+}
+
+.MuiSwitch-thumb {
+    background-color: var(--nx-cyan) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 19 — Scrollbars
+   ══════════════════════════════════════════════════════════ */
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: rgba(5, 9, 18, 0.30); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: rgba(0,212,255,0.22); border-radius: 3px; transition: background 0.2s; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,212,255,0.45); }
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 20 — Markdown Typography
+   ══════════════════════════════════════════════════════════ */
+
+[class*="markdown"] h1,
+[class*="markdown"] h2,
+[class*="markdown"] h3,
+[class*="markdown"] h4 {
+    color: var(--nx-text) !important;
+    border-bottom: 1px solid rgba(0,212,255,0.09) !important;
+    padding-bottom: 6px !important;
+    margin-top: 18px !important;
+    margin-bottom: 10px !important;
+    font-family: 'Inter', sans-serif !important;
+    font-weight: 600 !important;
+}
+
+[class*="markdown"] h1 { font-size: 1.5em !important; }
+[class*="markdown"] h2 { font-size: 1.25em !important; }
+[class*="markdown"] h3 { font-size: 1.10em !important; }
+
+[class*="markdown"] p {
+    color: rgba(240, 246, 255, 0.88) !important;
+    line-height: 1.75 !important;
+}
+
+[class*="markdown"] blockquote {
+    border-left: 3px solid var(--nx-cyan) !important;
+    background: rgba(0,212,255,0.05) !important;
+    border-radius: 0 var(--nx-radius-sm) var(--nx-radius-sm) 0 !important;
+    padding: 10px 16px !important;
+    color: var(--nx-muted) !important;
+    margin: 10px 0 !important;
+}
+
+[class*="markdown"] a {
+    color: var(--nx-cyan) !important;
+    text-decoration: none !important;
+    border-bottom: 1px solid rgba(0,212,255,0.25) !important;
+    transition: border-color 0.2s, color 0.2s !important;
+}
+
+[class*="markdown"] a:hover {
+    border-color: var(--nx-cyan) !important;
+    color: #fff !important;
+}
+
+[class*="markdown"] table { border-collapse: collapse !important; width: 100% !important; }
+
+[class*="markdown"] th {
+    background: rgba(0,212,255,0.08) !important;
+    border: 1px solid rgba(0,212,255,0.10) !important;
+    padding: 9px 14px !important;
+    color: var(--nx-cyan) !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+}
+
+[class*="markdown"] td {
+    border: 1px solid rgba(255,255,255,0.05) !important;
+    padding: 9px 14px !important;
+    color: var(--nx-muted) !important;
+    font-size: 13.5px !important;
+}
+
+[class*="markdown"] tr:nth-child(even) td {
+    background: rgba(0,212,255,0.025) !important;
+}
+
+[class*="markdown"] ul,
+[class*="markdown"] ol {
+    padding-left: 1.5em !important;
+}
+
+[class*="markdown"] li {
+    color: rgba(240,246,255,0.86) !important;
+    line-height: 1.7 !important;
+    margin-bottom: 4px !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 21 — Logo, Dividers, Typography, Selection
+   ══════════════════════════════════════════════════════════ */
+
+img[alt*="logo"],
+img[alt*="Logo"],
+[class*="logo"],
+[class*="Logo"] {
+    filter: drop-shadow(0 0 12px rgba(0,212,255,0.30)) !important;
+}
+
+.MuiDivider-root, hr {
+    border-color: rgba(0,212,255,0.08) !important;
+}
+
+.MuiTypography-root {
+    font-family: 'Inter', -apple-system, sans-serif !important;
+    color: var(--nx-text) !important;
+}
+
+.MuiTypography-body2,
+.MuiTypography-caption {
+    color: var(--nx-muted) !important;
+}
+
+/* Text selection highlight */
+::selection {
+    background: rgba(0,212,255,0.28);
+    color: #fff;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 22 — Animations: Recording Pulse, Streaming
+   ══════════════════════════════════════════════════════════ */
+
+@keyframes nx-pulse-glow {
+    0%, 100% { box-shadow: 0 0 6px rgba(0,212,255,0.20); }
+    50%       { box-shadow: 0 0 22px rgba(0,212,255,0.45), 0 0 40px rgba(0,212,255,0.15); }
+}
+
+[class*="recording"],
+[aria-label*="recording"],
+[aria-label*="Recording"] {
+    animation: nx-pulse-glow 1.4s ease-in-out infinite !important;
+    border-color: rgba(0,212,255,0.40) !important;
+}
+
+/* Streaming token cursor blink */
+@keyframes nx-cursor-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+}
+
+[class*="streaming"],
+[class*="Streaming"] {
+    border-right: 2px solid var(--nx-cyan) !important;
+    animation: nx-cursor-blink 0.9s step-end infinite !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 23 — Chat Profile Selector Cards
+   ══════════════════════════════════════════════════════════ */
+
+[class*="profile-card"],
+[class*="ProfileCard"] {
+    background: var(--nx-glass) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius) !important;
+    backdrop-filter: var(--nx-blur) !important;
+    transition: all 0.25s ease !important;
+}
+
+[class*="profile-card"]:hover,
+[class*="ProfileCard"]:hover {
+    border-color: rgba(0,212,255,0.35) !important;
+    background: rgba(0,212,255,0.07) !important;
+    transform: translateY(-3px) !important;
+    box-shadow: 0 10px 30px rgba(0,212,255,0.14) !important;
+}
+
+[class*="profile-card"][aria-selected="true"],
+[class*="ProfileCard"][aria-selected="true"] {
+    border-color: var(--nx-cyan) !important;
+    background: rgba(0,212,255,0.10) !important;
+    box-shadow: 0 0 22px var(--nx-cyan-glow) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 24 — AskUser Message (special prompt)
+   ══════════════════════════════════════════════════════════ */
+
+[class*="ask-user"],
+[class*="AskUser"] {
+    background: rgba(124,58,237,0.10) !important;
+    border: 1px solid rgba(124,58,237,0.25) !important;
+    border-radius: var(--nx-radius) !important;
+    backdrop-filter: var(--nx-blur) !important;
+    padding: 16px 20px !important;
+    position: relative !important;
+}
+
+[class*="ask-user"]::before,
+[class*="AskUser"]::before {
+    content: '' !important;
+    position: absolute !important;
+    top: 0; left: 0; right: 0 !important;
+    height: 1px !important;
+    background: linear-gradient(90deg, transparent, var(--nx-violet), transparent) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 25 — PDF Viewer
+   ══════════════════════════════════════════════════════════ */
+
+[class*="pdf"],
+[class*="Pdf"] {
+    background: rgba(8,14,28,0.92) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius-md) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 26 — Welcome message HTML (sent via cl.Message)
+   ══════════════════════════════════════════════════════════ */
+
+/* Target the first message that contains welcome content */
+.nx-welcome-card {
+    background: rgba(10,17,34,0.82) !important;
+    border: 1px solid rgba(0,212,255,0.20) !important;
+    border-radius: 20px !important;
+    backdrop-filter: blur(28px) saturate(1.7) !important;
+    padding: 28px 36px !important;
+    text-align: center !important;
+    position: relative !important;
+    overflow: hidden !important;
+    max-width: 520px !important;
+    margin: 0 auto !important;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04) !important;
+}
+
+.nx-welcome-card::before {
+    content: '' !important;
+    position: absolute !important;
+    top: 0; left: 0; right: 0 !important;
+    height: 2px !important;
+    background: linear-gradient(90deg, var(--nx-cyan), var(--nx-violet), var(--nx-pink)) !important;
+}
+
+.nx-welcome-card h1 {
+    font-family: 'Orbitron', sans-serif !important;
+    font-size: 2em !important;
+    font-weight: 800 !important;
+    background: linear-gradient(135deg, #00d4ff, #a78bfa) !important;
+    -webkit-background-clip: text !important;
+    -webkit-text-fill-color: transparent !important;
+    background-clip: text !important;
+    margin-bottom: 8px !important;
+    border: none !important;
+}
+
+.nx-welcome-card p {
+    color: rgba(240,246,255,0.80) !important;
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+}
+
+.nx-mode-badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    background: rgba(0,212,255,0.10) !important;
+    border: 1px solid rgba(0,212,255,0.22) !important;
+    border-radius: 20px !important;
+    padding: 4px 14px !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: var(--nx-cyan) !important;
+    letter-spacing: 0.05em !important;
+    text-transform: uppercase !important;
+    margin-bottom: 16px !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYER 27 — Chainlit v2.x Compatibility Patches
+   (v2.11.x uses data-testid selectors + different DOM structure)
+   ══════════════════════════════════════════════════════════ */
+
+/* Chat input box - v2.x specific */
+[data-testid="chat-input"],
+[data-testid="input-panel"],
+[id="chat-input-panel"],
+[id="input-panel"] {
+    background: rgba(10, 17, 34, 0.85) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    -webkit-backdrop-filter: var(--nx-blur-strong) !important;
+    border: 1px solid rgba(0, 212, 255, 0.20) !important;
+    border-radius: var(--nx-radius) !important;
+    box-shadow:
+        0 8px 32px rgba(0,0,0,0.50),
+        0 0 24px rgba(0,212,255,0.06) !important;
+}
+
+[data-testid="chat-input"]:focus-within,
+[data-testid="input-panel"]:focus-within {
+    border-color: rgba(0, 212, 255, 0.45) !important;
+    box-shadow:
+        0 8px 32px rgba(0,0,0,0.55),
+        0 0 40px rgba(0,212,255,0.12) !important;
+}
+
+/* Composer / message input */
+[data-testid="composer"],
+[class*="composer"],
+[class*="Composer"] {
+    background: rgba(10, 17, 34, 0.88) !important;
+    border: 1px solid rgba(0, 212, 255, 0.20) !important;
+    border-radius: var(--nx-radius) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    -webkit-backdrop-filter: var(--nx-blur-strong) !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.50), 0 0 24px rgba(0,212,255,0.06) !important;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease !important;
+}
+
+[data-testid="composer"]:focus-within,
+[class*="composer"]:focus-within {
+    border-color: rgba(0, 212, 255, 0.45) !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 40px rgba(0,212,255,0.14) !important;
+}
+
+/* Message thread container */
+[data-testid="message-thread"],
+[class*="message-thread"],
+[class*="MessageThread"] {
+    background: transparent !important;
+}
+
+/* Individual messages v2.x */
+[data-testid="message"],
+[data-message-role] {
+    animation: nx-fade-in 0.3s ease forwards !important;
+}
+
+[data-message-role="user"] {
+    background: linear-gradient(135deg, rgba(0,184,221,0.16), rgba(124,58,237,0.12)) !important;
+    border: 1px solid rgba(0,212,255,0.20) !important;
+    border-radius: 20px 20px 4px 20px !important;
+    box-shadow: var(--nx-shadow-sm) !important;
+}
+
+[data-message-role="assistant"] {
+    background: rgba(10, 17, 34, 0.76) !important;
+    border: 1px solid rgba(0,212,255,0.12) !important;
+    border-radius: 4px 20px 20px 20px !important;
+    box-shadow: var(--nx-glow-cyan), var(--nx-shadow) !important;
+}
+
+/* Thread sidebar v2.x */
+[data-testid="thread-sidebar"],
+[data-testid="sidebar"],
+[id="sidebar"] {
+    background: rgba(6, 10, 22, 0.92) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    border-right: 1px solid var(--nx-border) !important;
+}
+
+/* New chat button */
+[data-testid="new-chat-button"],
+[aria-label="New chat"] {
+    background: linear-gradient(135deg, var(--nx-cyan-mid), var(--nx-violet)) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: var(--nx-radius-sm) !important;
+    transition: all 0.2s ease !important;
+}
+
+[data-testid="new-chat-button"]:hover,
+[aria-label="New chat"]:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 6px 20px rgba(0,212,255,0.28) !important;
+}
+
+/* Upload button / attach */
+[data-testid="upload-button"],
+[aria-label="Attach file"],
+[aria-label="Upload file"] {
+    color: var(--nx-muted) !important;
+    border-radius: var(--nx-radius-sm) !important;
+    transition: color 0.2s, background 0.2s !important;
+}
+
+[data-testid="upload-button"]:hover,
+[aria-label="Attach file"]:hover {
+    color: var(--nx-cyan) !important;
+    background: rgba(0,212,255,0.08) !important;
+}
+
+/* Message actions (copy, thumbs up/down) */
+[data-testid="message-actions"],
+[class*="message-actions"],
+[class*="MessageActions"] {
+    background: rgba(8,14,28,0.88) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius-sm) !important;
+    backdrop-filter: var(--nx-blur-light) !important;
+    box-shadow: var(--nx-shadow-sm) !important;
+}
+
+/* Starters / welcome screen centering for v2.x */
+[data-testid="starters"],
+[data-testid="welcome-screen"],
+[class*="WelcomeScreen"],
+[class*="welcome-screen"] {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 60vh !important;
+    padding: 40px 24px !important;
+    text-align: center !important;
+}
+
+/* Starters grid layout */
+[data-testid="starters"] > div,
+[class*="starter-container"],
+[class*="StarterContainer"] {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+    gap: 12px !important;
+    max-width: 720px !important;
+    width: 100% !important;
+    margin: 16px auto 0 !important;
+}
+
+/* Individual starter button v2.x */
+[data-testid="starter-button"],
+[class*="starter-button"],
+[class*="StarterButton"] {
+    background: rgba(12, 18, 36, 0.65) !important;
+    border: 1px solid rgba(0,212,255,0.14) !important;
+    border-radius: var(--nx-radius) !important;
+    backdrop-filter: var(--nx-blur) !important;
+    color: var(--nx-text) !important;
+    text-align: left !important;
+    padding: 14px 18px !important;
+    transition: all 0.25s ease !important;
+    cursor: pointer !important;
+}
+
+[data-testid="starter-button"]:hover,
+[class*="starter-button"]:hover {
+    border-color: rgba(0,212,255,0.35) !important;
+    background: rgba(0,212,255,0.07) !important;
+    transform: translateY(-3px) !important;
+    box-shadow: 0 10px 28px rgba(0,212,255,0.14) !important;
+}
+
+/* Chat profile menu/modal */
+[data-testid="chat-profile-selector"],
+[data-testid="profile-modal"],
+[class*="ChatProfile"],
+[class*="chat-profile"] {
+    background: rgba(7, 12, 26, 0.96) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    box-shadow: var(--nx-shadow), var(--nx-glow-cyan) !important;
+}
+
+/* Settings widget panel */
+[data-testid="chat-settings"],
+[data-testid="settings-panel"] {
+    background: rgba(7, 12, 26, 0.96) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    color: var(--nx-text) !important;
+}
+
+/* Error message v2.x */
+[data-testid="error-message"],
+[class*="error-message"],
+[class*="ErrorMessage"] {
+    background: rgba(248, 113, 113, 0.10) !important;
+    border: 1px solid rgba(248, 113, 113, 0.25) !important;
+    border-radius: var(--nx-radius-md) !important;
+    color: #fca5a5 !important;
+}
+
+/* Streaming message indicator */
+[data-testid="streaming-indicator"],
+[class*="streaming-indicator"] {
+    color: var(--nx-cyan) !important;
+}
+
+/* Task/Step accordion */
+[data-testid="step"],
+[data-testid="task-list"] {
+    background: rgba(8,13,28,0.75) !important;
+    border: 1px solid rgba(0,212,255,0.08) !important;
+    border-left: 3px solid var(--nx-violet) !important;
+    border-radius: 0 var(--nx-radius-sm) var(--nx-radius-sm) 0 !important;
+    color: var(--nx-muted) !important;
+}
+
+/* Feedback buttons */
+[data-testid="feedback-buttons"],
+[aria-label="Thumbs up"],
+[aria-label="Thumbs down"],
+[aria-label="Like"],
+[aria-label="Dislike"] {
+    color: var(--nx-muted) !important;
+    border-radius: 8px !important;
+    transition: all 0.2s ease !important;
+}
+
+[aria-label="Thumbs up"]:hover,
+[aria-label="Like"]:hover {
+    color: #34d399 !important;
+    background: rgba(52, 211, 153, 0.10) !important;
+}
+
+[aria-label="Thumbs down"]:hover,
+[aria-label="Dislike"]:hover {
+    color: #f87171 !important;
+    background: rgba(248, 113, 113, 0.10) !important;
+}
+
+/* ══════════════════════════════════════════════════════════
+   SETTINGS MODAL (LIQUID GLASS FROST)
+   ══════════════════════════════════════════════════════════ */
+
+/* The Modal Box */
+[role="dialog"],
+.MuiDialog-paper {
+    background: var(--nx-glass-strong) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius) !important;
+    box-shadow: var(--nx-shadow), var(--nx-glow-cyan) !important;
+    color: var(--nx-text) !important;
+}
+
+/* Modal Title */
+[role="dialog"] .MuiTypography-root,
+[role="dialog"] h2 {
+    font-family: 'Orbitron', sans-serif !important;
+    color: var(--nx-text) !important;
+}
+
+/* Modal Label Text */
+[role="dialog"] label,
+[role="dialog"] .MuiFormLabel-root {
+    color: var(--nx-muted) !important;
+}
+
+/* Inputs, Selects, Textareas */
+[role="dialog"] input,
+[role="dialog"] select,
+[role="dialog"] textarea,
+[role="dialog"] .MuiInputBase-root {
+    background: var(--nx-surface) !important;
+    color: var(--nx-text) !important;
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius-sm) !important;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.1) !important;
+}
+
+/* Focus Glow for Inputs */
+[role="dialog"] .Mui-focused .MuiOutlinedInput-notchedOutline,
+[role="dialog"] input:focus,
+[role="dialog"] textarea:focus {
+    border-color: var(--nx-cyan) !important;
+    box-shadow: 0 0 12px var(--nx-cyan-glow) !important;
+}
+
+/* Overriding the default Chainlit Pink (Primary) Button */
+[role="dialog"] .MuiButton-contained,
+[role="dialog"] button[type="submit"],
+[role="dialog"] button.MuiButton-containedPrimary {
+    background: linear-gradient(135deg, var(--nx-cyan), var(--nx-violet)) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: var(--nx-radius-sm) !important;
+    box-shadow: var(--nx-glow-cyan) !important;
+    text-transform: uppercase !important;
+    font-weight: 700 !important;
+    letter-spacing: 1px !important;
+}
+
+[role="dialog"] .MuiButton-contained:hover,
+[role="dialog"] button[type="submit"]:hover {
+    filter: brightness(1.2) !important;
+    box-shadow: var(--nx-glow-violet) !important;
+}
+
+/* Cancel / Reset Buttons */
+[role="dialog"] .MuiButton-text,
+[role="dialog"] .MuiButton-outlined {
+    color: var(--nx-muted) !important;
+    border-color: var(--nx-border) !important;
+}
+
+[role="dialog"] .MuiButton-text:hover,
+[role="dialog"] .MuiButton-outlined:hover {
+    color: var(--nx-cyan) !important;
+    background: var(--nx-surface) !important;
+    border-color: var(--nx-cyan) !important;
+}
+
+/* Switch & Sliders */
+[role="dialog"] .MuiSlider-root {
+    color: var(--nx-cyan) !important;
+}
+[role="dialog"] .MuiSwitch-switchBase.Mui-checked {
+    color: var(--nx-cyan) !important;
+}
+[role="dialog"] .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track {
+    background-color: var(--nx-cyan) !important;
+}
+
+/* Backdrop */
+.MuiBackdrop-root {
+    background: rgba(0, 0, 0, 0.5) !important;
+    backdrop-filter: blur(12px) !important;
 }
