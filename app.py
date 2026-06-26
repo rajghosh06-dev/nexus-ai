@@ -76,9 +76,18 @@ class LocalStorageClient(BaseStorageClient):
 # Configure Storage Provider
 storage_provider = LocalStorageClient()
 
+class NexusDataLayer(SQLAlchemyDataLayer):
+    async def execute_sql(self, query: str, parameters: dict):
+        if parameters:
+            if "modes" in parameters and not isinstance(parameters["modes"], str) and parameters["modes"] is not None:
+                parameters["modes"] = json.dumps(parameters["modes"])
+            if "tags" in parameters and not isinstance(parameters["tags"], str) and parameters["tags"] is not None:
+                parameters["tags"] = json.dumps(parameters["tags"])
+        return await super().execute_sql(query, parameters)
+
 # Configure Data Layer globally
 # FIX P1-11: Remove direct cl_data._data_layer assignment; use only @cl.data_layer decorator
-data_layer = SQLAlchemyDataLayer(
+data_layer = NexusDataLayer(
     conninfo="sqlite+aiosqlite:///chainlit.db",
     storage_provider=storage_provider
 )
@@ -489,7 +498,7 @@ def sanitize_history_for_storage(history_array):
 
 # --- CHAINLIT STARTERS ---
 @cl.set_starters
-async def set_starters():
+async def set_starters(user: cl.User | None = None, **kwargs):
     return [
         cl.Starter(
             label="📚 Scholar RAG — Page Algorithms",
@@ -515,7 +524,7 @@ async def set_starters():
 
 
 @cl.set_chat_profiles
-async def chat_profile():
+async def chat_profile(user: cl.User | None = None, **kwargs):
     return [
         cl.ChatProfile(
             name="Omni Mode",
@@ -564,8 +573,8 @@ async def chat_profile():
 
 @cl.password_auth_callback
 async def auth_callback(username: str, password: str):
-    username = username.strip()
-    password = password.strip()
+    username = username.strip() if isinstance(username, str) else ""
+    password = password.strip() if isinstance(password, str) else ""
     if not username or not password:
         return None
         
@@ -956,6 +965,10 @@ async def enforce_three_session_limit():
         # FIX P1-11: Use cl_data.get_data_layer() instead of cl_data._data_layer
         if not layer or not hasattr(layer, "engine"):
             return
+        
+        from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
+        if not isinstance(layer, SQLAlchemyDataLayer):
+            return
 
         user = cl.user_session.get("user")
         if not user:
@@ -1007,7 +1020,7 @@ async def auto_rename_session(history):
                 # FIX P2-5: Preserve existing metadata before update_thread
                 try:
                     existing_thread = await layer.get_thread(thread_id)
-                    existing_meta = existing_thread.metadata if existing_thread and existing_thread.metadata else {}
+                    existing_meta = existing_thread.get("metadata", {}) if existing_thread and existing_thread.get("metadata") else {}
                 except Exception:
                     existing_meta = {}
                 await layer.update_thread(thread_id, name=title, metadata=existing_meta)
@@ -1080,7 +1093,8 @@ async def handle_message(message: cl.Message):
                 layer = cl_data.get_data_layer()
                 try:
                     # FIX P0-2: Selectively drop only session data tables — NOT users table
-                    if layer and hasattr(layer, "engine"):
+                    from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
+                    if layer and isinstance(layer, SQLAlchemyDataLayer) and hasattr(layer, "engine"):
                         async with layer.engine.begin() as conn:
                             for table in PURGEABLE_TABLES:
                                 await conn.run_sync(lambda c, t=table: t.drop(c, checkfirst=True))
@@ -1093,8 +1107,7 @@ async def handle_message(message: cl.Message):
                 await cl.CopilotFunction(name="new_chat_session", args={}).acall()
                 return
 
-        # --- ASKUSER MESSAGE TELEMETRY INTERACTION ---
-        msg_content = message.content.strip().lower() if message.content else ""
+        msg_content = message.content.strip().lower() if message.content and hasattr(message.content, "strip") else ""
         if "check ping" in msg_content or "predict ping" in msg_content:
             digits = re.findall(r'\d+', msg_content)
             if not digits:
@@ -1110,9 +1123,9 @@ async def handle_message(message: cl.Message):
                     content=f"🎮 **Network Telemetry**: Predicted ping for hour `{hour_val}:00` is `{ping} ms`."
                 )
                 actions = [
-                    cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
-                    cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
-                    cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
+                    cl.Action(name="regenerate_answer", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
+                    cl.Action(name="verify_citations", label="📄 Verify Citations", payload={"action": "verify"}),
+                    cl.Action(name="search_web_instead", label="🌐 Search Web Instead", payload={"action": "search_web"})
                 ]
                 response_msg.actions = actions
                 await response_msg.send()
@@ -1185,7 +1198,7 @@ async def handle_message(message: cl.Message):
         if message.elements:
             for element in message.elements:
                 try:
-                    name_lower = element.name.lower()
+                    name_lower = element.name.lower() if hasattr(element, "name") and element.name else ""
 
                     # Text / Code files
                     if name_lower.endswith(('.txt', '.py', '.js', '.ts', '.jsx', '.tsx',
@@ -1374,11 +1387,11 @@ async def handle_message(message: cl.Message):
                             tool_content, sources = search_textbooks_with_sources(args.get("search_query"), k=3)
                             cl.user_session.set("last_rag_result", tool_content)
                             cl.user_session.set("last_rag_sources", sources)
-                            elements = [cl.Text(name="Source", content=tool_content, display="inline")]
+                            elements: List[Any] = [cl.Text(name="Source", content=tool_content, display="inline")]
                             for src in sources:
                                 src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
                                 if os.path.exists(src_path):
-                                    if src.lower().endswith(".pdf"):
+                                    if isinstance(src, str) and src.lower().endswith(".pdf"):
                                         elements.append(cl.Pdf(name=src, path=src_path, display="side"))
                                     else:
                                         # FIX P2-12: cl.Text has no path param — read content or use cl.File
@@ -1420,13 +1433,13 @@ async def handle_message(message: cl.Message):
                 response_msg.actions = actions
 
                 rag_content = cl.user_session.get("last_rag_result")
-                elements = []
+                elements: List[Any] = []
                 if rag_content:
                     elements.append(cl.Text(name="Source", content=rag_content, display="side"))
                     rag_sources = cl.user_session.get("last_rag_sources") or []
                     for src in rag_sources:
                         src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
-                        if os.path.exists(src_path) and src.lower().endswith(".pdf"):
+                        if os.path.exists(src_path) and isinstance(src, str) and src.lower().endswith(".pdf"):
                             elements.append(cl.Pdf(name=src, path=src_path, display="side"))
                     cl.user_session.set("last_rag_result", None)
                     cl.user_session.set("last_rag_sources", None)
@@ -1495,13 +1508,13 @@ async def on_regenerate(action: cl.Action):
         ]
         response_msg.actions = actions
         rag_content = cl.user_session.get("last_rag_result")
-        elements = []
+        elements: List[Any] = []
         if rag_content:
             elements.append(cl.Text(name="Source", content=rag_content, display="side"))
             sources = cl.user_session.get("last_rag_sources") or []
             for src in sources:
                 src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
-                if os.path.exists(src_path) and src.lower().endswith(".pdf"):
+                if os.path.exists(src_path) and isinstance(src, str) and src.lower().endswith(".pdf"):
                     elements.append(cl.Pdf(name=src, path=src_path, display="side"))
             cl.user_session.set("last_rag_result", None)
             cl.user_session.set("last_rag_sources", None)
@@ -1587,7 +1600,7 @@ async def execute_resume_session(action: cl.Action):
         layer = cl_data.get_data_layer()
         thread = await layer.get_thread(session_id)
         if thread:
-            history = [{"role": msg.role, "content": msg.content} for msg in thread.steps if msg.type in ("user_message", "assistant_message")]
+            history = [{"role": msg.get("role") or msg.get("type", "").split("_")[0], "content": msg.get("content") or msg.get("output", "")} for msg in thread.get("steps", []) if msg.get("type") in ("user_message", "assistant_message")]
             cl.user_session.set("message_history", history)
             cl.user_session.set("session_id", session_id)
             await cl.Message(content="🔄 **Neural Link Re-established.** Context restored.").send()
