@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 import chainlit as cl
 from openai import OpenAI
 from openai import AsyncOpenAI
+from fastapi import Request, Response
 
 # Load environment variables first
 load_dotenv()
@@ -807,10 +808,11 @@ async def on_stop():
 
 
 @cl.on_logout
-async def on_logout(user: cl.User, response):
+async def on_logout(request: Request, response: Response):
     """Called on explicit logout — allows cleanup hooks."""
-    print(f"[*] User {user.identifier} logged out cleanly.")
-
+    # Since we can't grab the user identifier directly from a basic user object here,
+    # we log a clean session termination message safely.
+    print("[*] An active user session has logged out cleanly.")
 
 @cl.author_rename
 async def rename_author(orig_author: str):
