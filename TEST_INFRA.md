@@ -1,39 +1,38 @@
-# E2E Test Infra: NexusAI Theme & Layout Overhaul
+# E2E Test Infra: NexusAI UI & Features Overhaul
 
 ## Test Philosophy
 - Opaque-box, requirement-driven. No dependency on implementation design.
-- Methodology: CSS Parsing + AST verification + Server checking.
+- Methodology: Programmatic checks + API/UI checks + Automated verification scripts.
 
 ## Feature Inventory
-| # | Feature | Source (requirement) | Tier 1 (Feature) | Tier 2 (Boundary) | Tier 3 (Cross-Feature) | Tier 4 (Real-World) |
-|---|---|---|:---:|:---:|:---:|:---:|
-| 1 | Theme Color Aesthetic | ORIGINAL_REQUEST R1 | 5 | 5 | ✓ | ✓ |
-| 2 | Sidebar Overlap Prevention | ORIGINAL_REQUEST R2 | 5 | 5 | ✓ | ✓ |
-| 3 | Server Launch and Health | ORIGINAL_REQUEST Verification | 5 | 5 | ✓ | ✓ |
-
-## Test Cases Design
-### Tier 1: Feature Coverage
-- Verify `public/stylesheet.css` defines `--nexus-cyan`, `--nexus-violet`, glass/frost backgrounds.
-- Verify `public/theme.json` has correct dark theme configuration.
-- Verify message / step class styling overrides exist in `stylesheet.css`.
-- Verify scrollbar styling overrides exist in `stylesheet.css`.
-- Verify code blocks override styling exists.
-
-### Tier 2: Boundary & Corner Cases
-- Verify sidebar class (`.MuiDrawer-paper` or equivalent) has `backdrop-filter: blur` and check for z-index value.
-- Verify layout selector is modified to have padding/margin properties preventing layout overlap.
-- Check font imports are not broken.
-- Verify stylesheet uses valid CSS syntax (no malformed brackets/semicolons).
-- Verify server launch returns HTML response (checks on port 8000 or 8000/public/stylesheet.css).
-
-### Tier 3: Cross-Feature Combinations
-- Verify the coexistence of background gradients and glass frost panels.
-- Verify sidebar responsive width does not clash with the chat area content wrapper at different widths.
-
-### Tier 4: Real-World Application Scenarios
-- Launch the Chainlit app using `chainlit run app.py`, perform HTTP GET requests to check status, verify stylesheet links, and ensure zero frontend compilation or backend startup errors.
+| # | Feature | Source (requirement) | Tier 1 | Tier 2 | Tier 3 |
+|---|---------|---------------------|:------:|:------:|:------:|
+| 1 | UI Contrast & Settings Style | ORIGINAL_REQUEST R1 | 5 | 5 | ✓ |
+| 2 | Chat Profiles (Omni, Gamer, Voice, Scholar) | ORIGINAL_REQUEST R2 | 5 | 5 | ✓ |
+| 3 | Chat Settings (Model, System Prompt, Temp, DeepSearch) | ORIGINAL_REQUEST R2 | 5 | 5 | ✓ |
+| 4 | User Sessions & History (Max 3 threads) | ORIGINAL_REQUEST R2 | 5 | 5 | ✓ |
+| 5 | Authentication (Passwordless verification) | ORIGINAL_REQUEST R2 | 5 | 5 | ✓ |
+| 6 | Conversation Starters | ORIGINAL_REQUEST R3 | 5 | 5 | ✓ |
+| 7 | Ask User Flow (AskUserMessage) | ORIGINAL_REQUEST R3 | 5 | 5 | ✓ |
+| 8 | Interactive Actions (cl.Action) | ORIGINAL_REQUEST R3 | 5 | 5 | ✓ |
+| 9 | Multi-Modality Inputs | ORIGINAL_REQUEST R3 | 5 | 5 | ✓ |
 
 ## Test Architecture
-- Test Runner: Python script `verify_theme.py` (which uses tinycss2 or regex parsing to parse `stylesheet.css`, and `requests` / `urllib` to verify server status).
-- Invocation: `python verify_theme.py`
+- Test Runner: Python test suite (e.g. `verify_features.py`) invoking Chainlit server in a background process, and making programmatic HTTP requests / DB assertions / page queries.
+- Directory layout: tests should be placed in `tests/` or structured inside a verification script.
 - Pass/Fail Semantics: Exit code 0 if all assertions pass.
+
+## Real-World Application Scenarios (Tier 4)
+| # | Scenario | Features Exercised | Complexity |
+|---|----------|--------------------|------------|
+| 1 | End-to-End User Session | Auth, Profiles, Starters, Settings, History | High |
+| 2 | Gamer Profile & Action flow | Profiles, Ask User, Actions, Chat Settings | High |
+| 3 | Scholar Profile & Search | Profiles, History, Starters | Medium |
+| 4 | Multi-modal Voice/Image thread | Profiles, Multi-modality, Settings | High |
+| 5 | Session restoration & limits | Auth, Sessions, History, Thread limit | High |
+
+## Coverage Thresholds
+- Tier 1: 45 test assertions (5 per feature)
+- Tier 2: 45 test assertions (5 boundary/corner cases per feature)
+- Tier 3: 9 cross-feature interaction assertions
+- Tier 4: 5 realistic application scenarios

@@ -1,27 +1,38 @@
-# Project: NexusAI Theme & Layout Overhaul
+# Project: NexusAI UI & Features Overhaul
 
 ## Architecture
-- Custom CSS overrides are loaded automatically by Chainlit from `public/stylesheet.css`.
-- Primary colors, fonts, and base styling are defined in `public/theme.json`.
-- Layout structure uses Material UI (MUI) components (like `.MuiDrawer-paper`, `.message`, `.step`, `header`, footer, etc.).
-- Login screens are hosted statically at `public/login/index.html` and `public/login/signup.html`.
+- **Frontend UI**: Chainlit-based interface, customized via `public/stylesheet.css` and `public/theme.json`. Supports Light/Dark modes, "Liquid Glass Frost" aesthetic (cyan-violet gradients, deep frost backgrounds, glass blur effects).
+- **Backend API**: `app.py` serves the Chainlit application, routes LLM prompts using OpenAI/Gemini/Whisper, and integrates backend logic (RAG Search, network prediction, image description).
+- **Database & Storage**: SQL database (`chainlit.db`) stores chat sessions, threads, steps, elements, and user information via `SQLAlchemyDataLayer`. Elements are stored locally via `LocalStorageClient` at `public/elements`.
+- **Authentication**: Passwordless auth where username == password, managing session token and user profile context.
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status | Conv ID |
 |---|---|---|---|---|---|
-| 1 | E2E Testing Track | Design and implement the test suite verifying CSS styling, selector properties, and port 8000 server responsiveness | None | IN_PROGRESS | ad4946d1-85b4-4913-a86b-1f3504f7d4d8 |
-| 2 | Liquid Glass Frost Theme | Overhaul theme.json and stylesheet.css to match Liquid Glass Frost gradients, backgrounds, and font settings | M1 | IN_PROGRESS | 1c739666-de7c-46ab-a2be-1f72604f9e35 |
-| 3 | Sidebar Overlap Fix | Override CSS classes to ensure sidebar does not overlap chat area and has appropriate z-index/paddings | M2 | IN_PROGRESS | 1c739666-de7c-46ab-a2be-1f72604f9e35 |
-| 4 | Final E2E Pass & Audit | Run all tests, run Forensic Auditor, and perform final verification on live UI | M3 | PLANNED | TBD |
+| 1 | E2E Testing Track | Implement E2E test runner and 4-tier test cases for all requirements (UI, Profiles, Settings, Starters, Actions, Ask User, Multi-modality, Auth, History) | None | IN_PROGRESS | ea78fd4b-352a-4cab-b610-2648d2205537 |
+| 2 | UI & Light Mode Polish | Resolve light mode contrast, style settings screen with Liquid Glass Frost theme, ensure global aesthetic consistency | None | IN_PROGRESS | 7b16db2c-9f25-4bdd-b25c-e88e83d93b00 |
+| 3 | Core Chainlit Features | Implement Chat Profiles, Chat Settings (Model, System Prompt), User Sessions & History, and verify Auth integration | M2 | PLANNED | 7b16db2c-9f25-4bdd-b25c-e88e83d93b00 |
+| 4 | Advanced Interactive Features | Implement Starters, Ask User flow, Action buttons, and Multi-Modal input processing | M3 | PLANNED | 7b16db2c-9f25-4bdd-b25c-e88e83d93b00 |
+| 5 | E2E Pass & Hardening | Run all tests (Tiers 1-4), perform Forensic Audit, and run adversarial testing (Tier 5) | M1, M4 | PLANNED | 7b16db2c-9f25-4bdd-b25c-e88e83d93b00 |
 
 ## Interface Contracts
-### stylesheet.css ↔ Chainlit UI
-- Custom CSS must override default Chainlit styles without breaking interactivity or layout.
-- Specific overrides: `.MuiDrawer-paper` (or equivalent sidebar container) must have proper padding/z-index.
-- `.message` or `.step` elements must contain cyan-violet gradient values.
-- Dark frosted backgrounds and glass effects (`backdrop-filter: blur(...)`) must be styled properly.
+### Chat Settings & Profile States
+- System instructions update dynamically based on the current profile:
+  - `Omni Mode`: Standard assistant.
+  - `Scholar Mode`: Academic RAG search.
+  - `Gamer Mode`: Ping prediction context (asks for game name).
+  - `Voice Mode`: Voice processing context.
+- Settings:
+  - Model selection (mapped to correct LLM endpoints).
+  - System prompt (appended to system instructions).
+  - Temperature & DeepSearch flags.
+
+### Data Layer Interactions
+- Thread persistence limits history to 3 active threads per user.
+- SQL DB schema remains compatible with SQLite SQLAlchemy layer.
 
 ## Code Layout
-- `public/stylesheet.css`: Core CSS overrides for Chainlit.
-- `public/theme.json`: JSON configuration for Chainlit light/dark themes.
-- `public/login/index.html`: Reference styling for "Liquid Glass Frost".
+- `app.py`: Main Chainlit entrypoint and backend routing.
+- `public/stylesheet.css`: Custom styling overrides.
+- `public/theme.json`: Custom color palettes, typography, and dark/light settings.
+- `src/`: Backend logic modules (`latency_predictor.py`, `rag_scholar.py`).

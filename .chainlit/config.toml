@@ -8,22 +8,24 @@ user_env = []
 # Duration (in seconds) during which the session is saved when the connection is lost.
 session_timeout = 3600
 
+# Duration (in seconds) the user session persists on the server (not just connection loss).
+user_session_timeout = 3600
+
 # Enable third parties caching (e.g. LangChain cache)
 cache = false
 
-# Authorized origins
+# Authorized origins — allow workspace copilot page to connect
 allow_origins = ["*"]
 
 [features]
 # Process and display HTML in messages. Required for rich welcome cards.
 unsafe_allow_html = true
 
-
-# Process and display mathematical expressions. This requires the katex package.
-latex = false
+# Process and display mathematical expressions. Requires the katex package.
+latex = true
 
 # Automatically tag threads with the current chat profile.
-auto_tag_thread = false
+auto_tag_thread = true
 
 # Allow users to edit their own messages
 edit_message = true
@@ -31,12 +33,20 @@ edit_message = true
 # Show prompt playground
 prompt_playground = false
 
+# Allow users to favourite threads in the sidebar
+favorites = true
+
 # Speech to text
 [features.speech_to_text]
     enabled = true
 
 [features.audio]
     enabled = true
+    min_decibels = -45
+    initial_silence_timeout = 3000
+    silence_timeout = 1500
+    chunk_duration = 1000
+    max_duration = 120000
 
 # Multi-file upload enabled
 [features.spontaneous_file_upload]
@@ -49,7 +59,7 @@ prompt_playground = false
 # Name of the assistant.
 name = "NexusAI"
 
-# Description of the assistant. This is used for the meta description tag.
+# Description of the assistant. Used for meta description tag.
 description = "Dual-Engine Scholar-Gamer CoPilot — powered by Groq & Gemini"
 
 # Default theme (light/dark)
@@ -58,11 +68,21 @@ default_theme = "dark"
 # Don't ask for confirmation when clicking new chat
 confirm_new_chat = false
 
-# Chain of Thought expanded by default
-default_cot = "expanded"
+# Wide layout expands the chat interface for better readability
+layout = "wide"
+
+# Chain of Thought: "hidden" | "tool_call" | "full"
+# tool_call shows CoT only for tool/function steps — cleaner UX
+cot = "tool_call"
 
 # Collapse large feedback forms
 show_feedback_buttons = true
+
+# Chat settings panel location: "message_composer" | "sidebar"
+chat_settings_location = "sidebar"
+
+# Keep settings sidebar closed by default (user can open when needed)
+default_chat_settings_open = false
 
 # Custom CSS path
 custom_css = "/public/stylesheet.css"
@@ -79,14 +99,11 @@ logo = "/public/logo_dark.png"
 # GitHub link in header
 github = ""
 
-# Show readme on new chat (set false to hide the README tab on new chat)
-# show_readme_as_default = false
-
 [UI.header]
 hideable = false
 
 [meta]
-generated_by = "1.3.0"
+generated_by = "2.11.0"
 
 [data_persistence]
 # Explicitly enable the data layer

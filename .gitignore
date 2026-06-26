@@ -91,6 +91,7 @@ htmlcov/
 # ---- Temporary / scratch files ----
 tmp/
 temp/
+.agents
 *.tmp
 *.bak
 *.swp

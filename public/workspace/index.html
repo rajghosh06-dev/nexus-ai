@@ -3,30 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NexusAI Document Workspace</title>
+    <meta name="description" content="NexusAI Document Workspace — Dual-Engine Scholar-Gamer CoPilot">
+    <title>NexusAI — Document Workspace</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Chainlit Copilot Widget script (served by the Chainlit server) -->
     <script src="http://localhost:8000/copilot/index.js"></script>
 </head>
 <body>
-    
-    <!-- Left Side: Reading Workspace (70% width) -->
+
+    <!-- Full-width Document Workspace -->
+    <!-- The Chainlit sidebar (displayMode: "sidebar") attaches to the right edge
+         and pushes this workspace panel automatically — no manual width required. -->
     <div class="workspace">
-        <!-- Top Section (80% height): Native Document Viewer -->
+        <!-- Top 80%: Native Document Viewer -->
         <div id="viewer-section" class="viewer-section">
             <iframe id="doc-viewer" class="pdf-viewer" style="display: none;" src="" width="100%" height="100%"></iframe>
-            
+
             <div id="viewer-placeholder" class="viewer-placeholder">
                 <div class="placeholder-icon">📚</div>
                 <h2>Native Document Workspace</h2>
-                <p>Upload files and select a PDF file below to read inline here.</p>
+                <p>Upload files and select a document below to read inline here.</p>
             </div>
-            
+
             <div id="script-preview-container" class="script-preview-container" style="display: none;">
                 <pre><code id="script-preview-code"></code></pre>
             </div>
         </div>
 
-        <!-- Bottom Section (20% height): Staging Tray & Dropzone -->
+        <!-- Bottom 20%: Staging Tray & Dropzone -->
         <div class="workspace-bottom">
             <!-- Dropzone -->
             <div class="upload-box" id="drop-zone" onclick="document.getElementById('file-input').click()">
@@ -34,7 +38,10 @@
                     <span class="upload-icon">⚡</span>
                     <h3>Drag files here or Click to upload</h3>
                 </div>
-                <input type="file" id="file-input" style="display: none;" multiple accept=".png,.jpg,.jpeg,.webp,.doc,.docx,.pdf,.ppt,.pptx,.xls,.xlsx" onchange="handleFiles(this.files)">
+                <input type="file" id="file-input" style="display: none;"
+                    multiple
+                    accept=".png,.jpg,.jpeg,.webp,.doc,.docx,.pdf,.ppt,.pptx,.xls,.xlsx,.txt,.csv,.py,.js,.json,.md"
+                    onchange="handleFiles(this.files)">
             </div>
 
             <!-- Staging Tray -->
@@ -53,9 +60,7 @@
     <!-- Toast Notification Container -->
     <div id="toast-container" class="toast-container"></div>
 
-    <!-- Copilot Mount Point (30% width container) -->
-    <div class="copilot-container" id="copilot-root"></div>
-
+    <!-- Workspace Logic -->
     <script src="app.js"></script>
 </body>
 </html>

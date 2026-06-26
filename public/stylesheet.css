@@ -25,6 +25,14 @@
     --nx-violet-soft:   rgba(124, 58, 237, 0.08);
     --nx-pink:          #f43f8a;
 
+    /* E2E / Contrast Safe Tokens */
+    --nexus-cyan:       var(--nx-cyan);
+    --nexus-violet:     var(--nx-violet);
+    --nx-cyan-text:     #00d4ff;
+    --nx-violet-text:   #a78bfa;
+    --nx-code-text:     var(--nx-cyan);
+    --nx-toolbar-bg:    rgba(6, 11, 22, 0.40);
+
     /* Backgrounds */
     --nx-bg:            #070b14;
     --nx-bg-mid:        #0a1020;
@@ -82,6 +90,11 @@
 
     --nx-glow-cyan:     0 0 28px rgba(0, 212, 255, 0.3);
     --nx-glow-violet:   0 0 28px rgba(124, 58, 237, 0.3);
+
+    --nx-cyan-text:     #0891b2;
+    --nx-violet-text:   #7c3aed;
+    --nx-code-text:     var(--nx-cyan-dim);
+    --nx-toolbar-bg:    rgba(255, 255, 255, 0.40);
 
     /* Aurora defaults (Light Mode) */
     --nx-aurora-1: rgba(0, 212, 255, 0.05);
@@ -144,7 +157,7 @@ body::after {
    ══════════════════════════════════════════════════════════ */
 
 .MuiPaper-root {
-    background-color: rgba(10, 16, 32, 0.78) !important;
+    background-color: var(--nx-surface) !important;
     backdrop-filter: var(--nx-blur) !important;
     -webkit-backdrop-filter: var(--nx-blur) !important;
     color: var(--nx-text) !important;
@@ -162,11 +175,13 @@ body::after {
 }
 
 .MuiDrawer-root .MuiDrawer-paper {
-    background: rgba(6, 10, 22, 0.92) !important;
+    background: var(--nx-glass-strong) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
     -webkit-backdrop-filter: var(--nx-blur-strong) !important;
     border-right: 1px solid var(--nx-border) !important;
     box-shadow: 4px 0 40px rgba(0,0,0,0.55), inset -1px 0 0 rgba(0,212,255,0.06) !important;
+    z-index: 1200 !important;
+    padding: 0 !important;
 }
 
 nav[aria-label="threads"],
@@ -207,7 +222,7 @@ aside {
    ══════════════════════════════════════════════════════════ */
 
 header {
-    background: rgba(5, 9, 18, 0.88) !important;
+    background: var(--nx-glass-strong) !important;
     backdrop-filter: var(--nx-blur) !important;
     -webkit-backdrop-filter: var(--nx-blur) !important;
     border-bottom: 1px solid var(--nx-border) !important;
@@ -277,7 +292,7 @@ footer,
 /* Target the input pill container specifically */
 .MuiPaper-root:has(textarea),
 .MuiPaper-root:has([contenteditable="true"]) {
-    background: rgba(10, 17, 34, 0.85) !important;
+    background: var(--nx-glass) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
     -webkit-backdrop-filter: var(--nx-blur-strong) !important;
     border: 1px solid rgba(0, 212, 255, 0.20) !important;
@@ -340,7 +355,7 @@ textarea:focus,
 [class*="InputToolbar"],
 [class*="toolbar"] {
     border-top: 1px solid rgba(0, 212, 255, 0.08) !important;
-    background: rgba(6, 11, 22, 0.40) !important;
+    background: var(--nx-toolbar-bg) !important;
     border-radius: 0 0 var(--nx-radius) var(--nx-radius) !important;
     padding: 6px 12px !important;
 }
@@ -467,7 +482,7 @@ footer span {
 [class*="bot-message"],
 [class*="BotMessage"],
 [data-role="assistant"] [class*="message"] {
-    background: rgba(10, 17, 34, 0.76) !important;
+    background: var(--nx-surface) !important;
     border: 1px solid rgba(0,212,255,0.12) !important;
     border-radius: 4px 20px 20px 20px !important;
     backdrop-filter: var(--nx-blur) !important;
@@ -499,7 +514,7 @@ footer span {
 
 [class*="step"],
 [class*="Step"] {
-    background: rgba(8,13,28,0.75) !important;
+    background: var(--nx-glass) !important;
     border: 1px solid rgba(0,212,255,0.08) !important;
     border-left: 3px solid var(--nx-violet) !important;
     border-radius: 0 var(--nx-radius-sm) var(--nx-radius-sm) 0 !important;
@@ -555,7 +570,7 @@ pre, code, kbd, .hljs {
 }
 
 pre {
-    background: rgba(4, 8, 18, 0.96) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid rgba(0,212,255,0.10) !important;
     border-radius: var(--nx-radius-sm) !important;
     box-shadow: 0 4px 20px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.04) !important;
@@ -580,7 +595,7 @@ code:not(pre code) {
     border: 1px solid rgba(0,212,255,0.16) !important;
     border-radius: 5px !important;
     padding: 2px 6px !important;
-    color: var(--nx-cyan) !important;
+    color: var(--nx-code-text) !important;
     font-size: 0.87em !important;
 }
 
@@ -590,7 +605,7 @@ code:not(pre code) {
 
 .MuiMenu-paper,
 .MuiPopover-paper {
-    background: rgba(7, 12, 26, 0.97) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: var(--nx-radius-md) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
@@ -600,7 +615,7 @@ code:not(pre code) {
 }
 
 .MuiTooltip-tooltip {
-    background: rgba(8, 14, 30, 0.97) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: 8px !important;
     color: var(--nx-text) !important;
@@ -634,7 +649,7 @@ code:not(pre code) {
 
 .MuiOutlinedInput-root,
 .MuiInputBase-root {
-    background: rgba(10,18,36,0.72) !important;
+    background: var(--nx-surface) !important;
     border-radius: var(--nx-radius-sm) !important;
     color: var(--nx-text) !important;
     font-family: 'Inter', sans-serif !important;
@@ -683,7 +698,7 @@ code:not(pre code) {
 }
 
 .MuiDialog-paper {
-    background: rgba(7, 12, 28, 0.96) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: 22px !important;
     backdrop-filter: var(--nx-blur-strong) !important;
@@ -693,8 +708,9 @@ code:not(pre code) {
 }
 
 .MuiBackdrop-root {
-    background: rgba(3, 6, 16, 0.70) !important;
-    backdrop-filter: blur(6px) !important;
+    background: rgba(3, 6, 16, 0.60) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -703,7 +719,7 @@ code:not(pre code) {
 
 [class*="action-button"],
 [class*="ActionButton"] {
-    background: rgba(10,17,34,0.75) !important;
+    background: var(--nx-surface) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: 9px !important;
     color: var(--nx-muted) !important;
@@ -765,7 +781,7 @@ code:not(pre code) {
 [class*="VideoElement"],
 [class*="pdf-element"],
 [class*="PdfElement"] {
-    background: rgba(10,18,36,0.82) !important;
+    background: var(--nx-glass) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: var(--nx-radius-md) !important;
     backdrop-filter: var(--nx-blur-light) !important;
@@ -790,7 +806,7 @@ code:not(pre code) {
 
 /* Audio player styling */
 audio {
-    background: rgba(8,14,28,0.90) !important;
+    background: var(--nx-glass-strong) !important;
     border-radius: var(--nx-radius-sm) !important;
     border: 1px solid var(--nx-border) !important;
     outline: none !important;
@@ -810,7 +826,7 @@ video {
 [class*="FileUpload"],
 [class*="upload-preview"],
 [class*="UploadPreview"] {
-    background: rgba(10,17,34,0.80) !important;
+    background: var(--nx-glass) !important;
     border: 2px dashed var(--nx-border) !important;
     border-radius: var(--nx-radius) !important;
     transition: all 0.2s ease !important;
@@ -843,7 +859,7 @@ video {
 [role="alert"],
 [class*="toast"],
 [class*="Toast"] {
-    background: rgba(10,17,34,0.96) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: var(--nx-radius-md) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
@@ -855,7 +871,7 @@ video {
 [class*="command"],
 [class*="Command"],
 [class*="autocomplete"] {
-    background: rgba(5, 9, 22, 0.98) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: var(--nx-radius-md) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
@@ -872,7 +888,7 @@ video {
 /* Settings panel */
 [class*="settings"],
 [class*="Settings"] {
-    background: rgba(7,12,26,0.96) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: var(--nx-radius) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
@@ -927,7 +943,7 @@ video {
 [class*="markdown"] h3 { font-size: 1.10em !important; }
 
 [class*="markdown"] p {
-    color: rgba(240, 246, 255, 0.88) !important;
+    color: var(--nx-text) !important;
     line-height: 1.75 !important;
 }
 
@@ -980,7 +996,7 @@ video {
 }
 
 [class*="markdown"] li {
-    color: rgba(240,246,255,0.86) !important;
+    color: var(--nx-text) !important;
     line-height: 1.7 !important;
     margin-bottom: 4px !important;
 }
@@ -1101,7 +1117,7 @@ img[alt*="Logo"],
 
 [class*="pdf"],
 [class*="Pdf"] {
-    background: rgba(8,14,28,0.92) !important;
+    background: var(--nx-glass) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: var(--nx-radius-md) !important;
 }
@@ -1112,17 +1128,18 @@ img[alt*="Logo"],
 
 /* Target the first message that contains welcome content */
 .nx-welcome-card {
-    background: rgba(10,17,34,0.82) !important;
+    background: var(--nx-glass) !important;
     border: 1px solid rgba(0,212,255,0.20) !important;
     border-radius: 20px !important;
-    backdrop-filter: blur(28px) saturate(1.7) !important;
+    backdrop-filter: var(--nx-blur-strong) !important;
+    -webkit-backdrop-filter: var(--nx-blur-strong) !important;
     padding: 28px 36px !important;
     text-align: center !important;
     position: relative !important;
     overflow: hidden !important;
     max-width: 520px !important;
     margin: 0 auto !important;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04) !important;
+    box-shadow: var(--nx-shadow), 0 0 0 1px rgba(255,255,255,0.04) !important;
 }
 
 .nx-welcome-card::before {
@@ -1146,9 +1163,13 @@ img[alt*="Logo"],
 }
 
 .nx-welcome-card p {
-    color: rgba(240,246,255,0.80) !important;
+    color: var(--nx-text) !important;
     font-size: 14px !important;
     line-height: 1.6 !important;
+}
+
+.nx-welcome-desc {
+    color: var(--nx-muted) !important;
 }
 
 .nx-mode-badge {
@@ -1177,7 +1198,7 @@ img[alt*="Logo"],
 [data-testid="input-panel"],
 [id="chat-input-panel"],
 [id="input-panel"] {
-    background: rgba(10, 17, 34, 0.85) !important;
+    background: var(--nx-glass) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
     -webkit-backdrop-filter: var(--nx-blur-strong) !important;
     border: 1px solid rgba(0, 212, 255, 0.20) !important;
@@ -1199,7 +1220,7 @@ img[alt*="Logo"],
 [data-testid="composer"],
 [class*="composer"],
 [class*="Composer"] {
-    background: rgba(10, 17, 34, 0.88) !important;
+    background: var(--nx-glass) !important;
     border: 1px solid rgba(0, 212, 255, 0.20) !important;
     border-radius: var(--nx-radius) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
@@ -1235,7 +1256,7 @@ img[alt*="Logo"],
 }
 
 [data-message-role="assistant"] {
-    background: rgba(10, 17, 34, 0.76) !important;
+    background: var(--nx-surface) !important;
     border: 1px solid rgba(0,212,255,0.12) !important;
     border-radius: 4px 20px 20px 20px !important;
     box-shadow: var(--nx-glow-cyan), var(--nx-shadow) !important;
@@ -1245,7 +1266,7 @@ img[alt*="Logo"],
 [data-testid="thread-sidebar"],
 [data-testid="sidebar"],
 [id="sidebar"] {
-    background: rgba(6, 10, 22, 0.92) !important;
+    background: var(--nx-glass-strong) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
     border-right: 1px solid var(--nx-border) !important;
 }
@@ -1285,7 +1306,7 @@ img[alt*="Logo"],
 [data-testid="message-actions"],
 [class*="message-actions"],
 [class*="MessageActions"] {
-    background: rgba(8,14,28,0.88) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: var(--nx-radius-sm) !important;
     backdrop-filter: var(--nx-blur-light) !important;
@@ -1322,7 +1343,7 @@ img[alt*="Logo"],
 [data-testid="starter-button"],
 [class*="starter-button"],
 [class*="StarterButton"] {
-    background: rgba(12, 18, 36, 0.65) !important;
+    background: var(--nx-glass) !important;
     border: 1px solid rgba(0,212,255,0.14) !important;
     border-radius: var(--nx-radius) !important;
     backdrop-filter: var(--nx-blur) !important;
@@ -1346,7 +1367,7 @@ img[alt*="Logo"],
 [data-testid="profile-modal"],
 [class*="ChatProfile"],
 [class*="chat-profile"] {
-    background: rgba(7, 12, 26, 0.96) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: var(--nx-radius) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
@@ -1356,7 +1377,7 @@ img[alt*="Logo"],
 /* Settings widget panel */
 [data-testid="chat-settings"],
 [data-testid="settings-panel"] {
-    background: rgba(7, 12, 26, 0.96) !important;
+    background: var(--nx-glass-strong) !important;
     border: 1px solid var(--nx-border) !important;
     border-radius: var(--nx-radius) !important;
     backdrop-filter: var(--nx-blur-strong) !important;
@@ -1382,7 +1403,7 @@ img[alt*="Logo"],
 /* Task/Step accordion */
 [data-testid="step"],
 [data-testid="task-list"] {
-    background: rgba(8,13,28,0.75) !important;
+    background: var(--nx-glass) !important;
     border: 1px solid rgba(0,212,255,0.08) !important;
     border-left: 3px solid var(--nx-violet) !important;
     border-radius: 0 var(--nx-radius-sm) var(--nx-radius-sm) 0 !important;
@@ -1428,23 +1449,26 @@ img[alt*="Logo"],
 }
 
 /* Modal Title */
-[role="dialog"] .MuiTypography-root,
-[role="dialog"] h2 {
+h2,
+.MuiDialogTitle-root,
+.MuiDialogTitle-root .MuiTypography-root {
     font-family: 'Orbitron', sans-serif !important;
     color: var(--nx-text) !important;
 }
 
 /* Modal Label Text */
-[role="dialog"] label,
-[role="dialog"] .MuiFormLabel-root {
+.MuiFormLabel-root,
+.MuiInputLabel-root,
+.MuiFormControlLabel-root,
+label {
+    font-family: 'Inter', -apple-system, sans-serif !important;
     color: var(--nx-muted) !important;
 }
 
 /* Inputs, Selects, Textareas */
 [role="dialog"] input,
 [role="dialog"] select,
-[role="dialog"] textarea,
-[role="dialog"] .MuiInputBase-root {
+[role="dialog"] textarea {
     background: var(--nx-surface) !important;
     color: var(--nx-text) !important;
     border: 1px solid var(--nx-border) !important;
@@ -1452,12 +1476,36 @@ img[alt*="Logo"],
     box-shadow: inset 0 2px 4px rgba(0,0,0,0.1) !important;
 }
 
-/* Focus Glow for Inputs */
-[role="dialog"] .Mui-focused .MuiOutlinedInput-notchedOutline,
+[role="dialog"] .MuiInputBase-root {
+    background: var(--nx-surface) !important;
+    color: var(--nx-text) !important;
+    border: none !important; /* Remove outer border */
+    border-radius: var(--nx-radius-sm) !important;
+}
+
+/* Style MuiOutlinedInput notchedOutline border */
+[role="dialog"] .MuiOutlinedInput-notchedOutline {
+    border: 1px solid var(--nx-border) !important;
+    border-radius: var(--nx-radius-sm) !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+/* Active glow/focus overrides */
+[role="dialog"] .MuiInputBase-root.Mui-focused .MuiOutlinedInput-notchedOutline,
+[role="dialog"] .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline,
 [role="dialog"] input:focus,
+[role="dialog"] select:focus,
 [role="dialog"] textarea:focus {
     border-color: var(--nx-cyan) !important;
     box-shadow: 0 0 12px var(--nx-cyan-glow) !important;
+    outline: none !important;
+}
+
+[role="dialog"] .MuiOutlinedInput-root:hover .MuiOutlinedInput-notchedOutline,
+[role="dialog"] input:hover,
+[role="dialog"] select:hover,
+[role="dialog"] textarea:hover {
+    border-color: var(--nx-border-hover) !important;
 }
 
 /* Overriding the default Chainlit Pink (Primary) Button */
@@ -1494,19 +1542,56 @@ img[alt*="Logo"],
     border-color: var(--nx-cyan) !important;
 }
 
-/* Switch & Sliders */
-[role="dialog"] .MuiSlider-root {
+/* Sliders, Switches, and Checkboxes */
+.MuiSlider-root {
     color: var(--nx-cyan) !important;
 }
-[role="dialog"] .MuiSwitch-switchBase.Mui-checked {
-    color: var(--nx-cyan) !important;
+.MuiSlider-rail {
+    background-color: var(--nx-border) !important;
+    opacity: 1 !important;
 }
-[role="dialog"] .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track {
+.MuiSlider-track {
+    background: linear-gradient(90deg, var(--nx-cyan), var(--nx-violet)) !important;
+    border: none !important;
+}
+.MuiSlider-thumb {
     background-color: var(--nx-cyan) !important;
+    border: 2px solid var(--nx-bg) !important;
+    box-shadow: 0 0 10px var(--nx-cyan-glow) !important;
+}
+.MuiSlider-thumb:hover, .MuiSlider-thumb.Mui-focusVisible {
+    box-shadow: 0 0 15px var(--nx-cyan) !important;
+}
+.MuiSlider-valueLabel {
+    background: var(--nx-glass-strong) !important;
+    backdrop-filter: var(--nx-blur-light) !important;
+    -webkit-backdrop-filter: var(--nx-blur-light) !important;
+    border: 1px solid var(--nx-border) !important;
+    color: var(--nx-text) !important;
+    border-radius: 6px !important;
 }
 
-/* Backdrop */
-.MuiBackdrop-root {
-    background: rgba(0, 0, 0, 0.5) !important;
-    backdrop-filter: blur(12px) !important;
+.MuiSwitch-root .MuiSwitch-switchBase {
+    color: var(--nx-muted) !important;
+}
+.MuiSwitch-root .MuiSwitch-switchBase.Mui-checked {
+    color: var(--nx-cyan) !important;
+}
+.MuiSwitch-root .MuiSwitch-switchBase + .MuiSwitch-track {
+    background-color: var(--nx-border) !important;
+    opacity: 0.5 !important;
+}
+.MuiSwitch-root .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track {
+    background-color: var(--nx-cyan) !important;
+    opacity: 0.6 !important;
+}
+
+.MuiCheckbox-root {
+    color: var(--nx-muted) !important;
+}
+.MuiCheckbox-root.Mui-checked {
+    color: var(--nx-cyan) !important;
+}
+.MuiCheckbox-root:hover {
+    background-color: var(--nx-cyan-soft) !important;
 }

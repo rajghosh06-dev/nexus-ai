@@ -1,21 +1,21 @@
-# BRIEFING — 2026-06-24T13:44:00Z
+# BRIEFING — 2026-06-25T18:03:38+05:30
 
 ## Mission
-Overhaul Chainlit UI theme to Liquid Glass Frost and fix sidebar overlaps using stylesheet and theme overrides.
+Decompose and execute NexusAI UI and feature overhaul (profiles, settings, starters, actions, ask user, multi-modality, auth, history).
 
 ## 🔒 My Identity
 - Archetype: teamwork_preview_orchestrator
 - Roles: orchestrator, user_liaison, human_reporter, successor
-- Working directory: E:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator
+- Working directory: e:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator
 - Original parent: main agent
-- Original parent conversation ID: 94617591-24f9-4bd4-b67f-83329d6f7dc8
+- Original parent conversation ID: f9a38081-637c-4b46-a4df-b184b54017b3
 
 ## 🔒 My Workflow
 - **Pattern**: Project
-- **Scope document**: E:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator\PROJECT.md
-1. **Decompose**: Decompose the project into Milestones and E2E testing tracks.
+- **Scope document**: e:\RAJ-WORK\PROJECT\nexus-ai\PROJECT.md
+1. **Decompose**: Decomposed the scope into 5 sequential/parallel milestones across implementation and E2E testing tracks.
 2. **Dispatch & Execute** (pick ONE):
-   - **Delegate (sub-orchestrator)**: Spawn a sub-orchestrator for each milestone.
+   - **Delegate (sub-orchestrator)**: Spawn a sub-orchestrator for each milestone track (E2E Testing Track and Implementation Track).
 3. **On failure** (in this order):
    - Retry: nudge stuck agent or re-send task
    - Replace: spawn fresh agent with partial progress
@@ -25,47 +25,50 @@ Overhaul Chainlit UI theme to Liquid Glass Frost and fix sidebar overlaps using 
    - Escalate: report to parent (sub-orchestrators only, last resort)
 4. **Succession**: Self-succeed at 16 spawns, write handoff.md, spawn successor.
 - **Work items**:
-  1. Decompose project into PROJECT.md and TEST_INFRA.md [pending]
-  2. Implement Liquid Glass Frost theme and fix overlaps (Milestone 1) [pending]
-  3. E2E Testing Track (Milestone 2) [pending]
-  4. Integration and Final validation [pending]
-- **Current phase**: 1
-- **Current focus**: Decomposition
+  1. Decompose project into PROJECT.md and TEST_INFRA.md [done]
+  2. Dispatch E2E Testing Track [pending]
+  3. Dispatch Implementation Track for UI & Features [pending]
+  4. Run E2E Pass, Forensic Audit, and Hardening [pending]
+- **Current phase**: 2
+- **Current focus**: Dispatching subtasks to E2E Testing Track and Implementation Track
 
 ## 🔒 Key Constraints
-- Never write, modify, or create source code files directly.
-- Never run build/test commands yourself.
-- Rely on workers/subagents for code, tests, and verification.
-- Never reuse a subagent after it has delivered its handoff.
-- Forensic Auditor verdict is a binary veto.
+- NEVER write, modify, or create source code files directly.
+- NEVER run build/test commands yourself — require workers to do so.
+- You MAY use file-editing tools ONLY for metadata/state files (.md) in your .agents/ folder.
+- If a Forensic Auditor reports INTEGRITY VIOLATION, the milestone FAILS UNCONDITIONALLY.
+- Never reuse a subagent after it has delivered its handoff — always spawn fresh
 
 ## Current Parent
-- Conversation ID: 94617591-24f9-4bd4-b67f-83329d6f7dc8
-- Updated: 2026-06-24T14:10:00Z
+- Conversation ID: f9a38081-637c-4b46-a4df-b184b54017b3
+- Updated: 2026-06-25T18:03:38+05:30
 
 ## Key Decisions Made
-- Use Project pattern with Dual Track (Implementation & E2E Testing).
+- Use Project pattern with Dual Track (Implementation + E2E Testing).
+- E2E Testing Track runs in parallel and publishes `TEST_READY.md`.
+- Implementation Track implements features sequentially and passes the E2E tests.
 
 ## Team Roster
 | Agent | Type | Work Item | Status | Conv ID |
 |-------|------|-----------|--------|---------|
-| sub_orch_e2e | self | E2E Testing Track | in-progress | ad4946d1-85b4-4913-a86b-1f3504f7d4d8 |
-| sub_orch_impl | self | Implementation Track | in-progress | 1c739666-de7c-46ab-a2be-1f72604f9e35 |
+| sub_orch_e2e_v2 | self | E2E Testing Track | in-progress | ea78fd4b-352a-4cab-b610-2648d2205537 |
+| sub_orch_impl_v2 | self | Implementation Track | in-progress | 7b16db2c-9f25-4bdd-b25c-e88e83d93b00 |
 
 ## Succession Status
 - Succession required: no
-- Spawn count: 2 / 16
-- Pending subagents: ad4946d1-85b4-4913-a86b-1f3504f7d4d8, 1c739666-de7c-46ab-a2be-1f72604f9e35
+- Spawn count: 4 / 16
+- Pending subagents: ea78fd4b-352a-4cab-b610-2648d2205537, 7b16db2c-9f25-4bdd-b25c-e88e83d93b00
 - Predecessor: none
 - Successor: not yet spawned
 
 ## Active Timers
-- Heartbeat cron: task-19
+- Heartbeat cron: d9fe2ef7-98f7-4820-b4da-bb95c5559590/task-45
 - Safety timer: none
 - On succession: kill all timers before spawning successor
-- On context truncation: run manage_task(Action="list") — re-create if missing
+- On context truncation: run `manage_task(Action="list")` — re-create if missing
 
 ## Artifact Index
-- E:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator\PROJECT.md — Global project index and plan
-- E:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator\progress.md — Progress heartbeat
-- E:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator\BRIEFING.md — Briefing file
+- e:\RAJ-WORK\PROJECT\nexus-ai\PROJECT.md — Global project index and plan
+- e:\RAJ-WORK\PROJECT\nexus-ai\TEST_INFRA.md — Test infrastructure and feature inventory
+- e:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator\progress.md — Progress heartbeat
+- e:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator\BRIEFING.md — Briefing file

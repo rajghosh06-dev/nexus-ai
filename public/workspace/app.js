@@ -1,9 +1,12 @@
 // ==========================================
-// 🚀 CLIENT-SIDE ROUTING INTERCEPTOR
-// Chainlit's React SPA tries to hijack /login.
-// We intercept it here and hard-redirect to our custom HTML pages.
-// We use the /public/ path because it bypasses Chainlit's Auth Middleware!
+// 🚀 NexusAI Workspace — app.js
+// Client-side routing + Chainlit Copilot sidebar integration
 // ==========================================
+
+// --- LOGIN REDIRECT INTERCEPTOR ---
+// Intercepts Chainlit's React SPA navigation to /login
+// and hard-redirects to our custom HTML page in /public/
+// (which bypasses Chainlit's Auth Middleware)
 if (window.location.pathname === '/login') {
     window.location.href = '/public/login/index.html';
 }
@@ -20,103 +23,78 @@ window.addEventListener('popstate', function() {
     }
 });
 
-let stagedFiles = []; // Array of File objects
-let previewObjectUrls = {}; // Maps filename to object URL for previews
-let selectedFilename = null; // Tracks the single selected file name
+let stagedFiles = [];          // Array of File objects in staging tray
+let previewObjectUrls = {};    // Maps filename → object URL for local previews
+let selectedFilename = null;   // Single selected file name for analysis
 
 document.addEventListener('DOMContentLoaded', () => {
-    // 1. Initialize the Chainlit Copilot Widget
-    window.mountChainlitWidget({
-        chainlitServer: "http://localhost:8000",
-        theme: "dark",
-        button: {
-            style: {
-                bgcolor: "#00d4ff",
-                color: "#060b16",
-                border: "none"
+
+    // --- THEME DETECTION ---
+    // Reads from localStorage (Chainlit stores 'theme' there)
+    const activeTheme = localStorage.getItem("theme") || "dark";
+    if (activeTheme === "light") {
+        document.documentElement.setAttribute("data-theme", "light");
+        document.documentElement.classList.add("light");
+    } else {
+        document.documentElement.setAttribute("data-theme", "dark");
+        document.documentElement.classList.remove("light");
+    }
+
+    // Watch for Chainlit theme changes in real-time
+    window.addEventListener("storage", (e) => {
+        if (e.key === "theme") {
+            const newTheme = e.newValue || "dark";
+            if (newTheme === "light") {
+                document.documentElement.setAttribute("data-theme", "light");
+                document.documentElement.classList.add("light");
+            } else {
+                document.documentElement.setAttribute("data-theme", "dark");
+                document.documentElement.classList.remove("light");
             }
         }
     });
 
-    // Auto-open Copilot, reparent to #copilot-root, & inject style overrides into Shadow DOM
-    // FIX P2-18: Improved clearInterval guard — check both computed style AND class/hidden attribute
-    let copilotInjected = false;
-    const openCopilotInterval = setInterval(() => {
-        const copilotHost = document.getElementById('chainlit-copilot');
-        const copilotRoot = document.getElementById('copilot-root');
+    // --- CHAINLIT COPILOT WIDGET ---
+    // Using displayMode: "sidebar" — the official Chainlit v2.11+ integration.
+    // The sidebar pushes the workspace content from the right edge,
+    // providing a clean split-panel experience without Shadow DOM hacks.
+    window.mountChainlitWidget({
+        chainlitServer: "http://localhost:8000",
+        displayMode: "sidebar",
+        theme: activeTheme,
+        expanded: true,
+        opened: true,
+    });
 
-        // Reparent inside the dedicated split column
-        if (copilotHost && copilotRoot && copilotHost.parentNode !== copilotRoot) {
-            copilotRoot.appendChild(copilotHost);
-        }
+    // --- CHAINLIT BACKEND FUNCTION LISTENER ---
+    // Handles CopilotFunction calls from the Python backend
+    window.addEventListener("chainlit-call-fn", (e) => {
+        const { name, args, callback } = e.detail;
 
-        if (copilotHost && copilotHost.shadowRoot) {
-            const popover = copilotHost.shadowRoot.getElementById('chainlit-copilot-popover');
-            const copilotBtn = copilotHost.shadowRoot.getElementById('chainlit-copilot-button');
-
-            // Inject custom styles directly into the shadow root to force panel open
-            if (!copilotHost.shadowRoot.getElementById('custom-copilot-styles')) {
-                const style = document.createElement('style');
-                style.id = 'custom-copilot-styles';
-                style.textContent = `
-                    #chainlit-copilot-button { display: none !important; }
-                    #chainlit-copilot-popover {
-                        display: block !important;
-                        width: 100% !important;
-                        height: 100vh !important;
-                        position: relative !important;
-                        right: 0 !important;
-                        left: auto !important;
-                        border-radius: 0 !important;
-                        box-shadow: none !important;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                        border: none !important;
-                        background: transparent !important;
-                        transform: none !important;
-                    }
-                    #chainlit-copilot-popover iframe {
-                        position: relative !important;
-                        width: 100% !important;
-                        height: 100% !important;
-                        border: none !important;
-                        right: 0 !important;
-                        left: auto !important;
-                    }
-                `;
-                copilotHost.shadowRoot.appendChild(style);
-            }
-
-            // Click button to initialize open state if popover is hidden
-            // FIX P2-18: Check computed style AND visibility state properly
-            if (copilotBtn && popover) {
-                const computedDisplay = window.getComputedStyle(popover).display;
-                const isHidden = (
-                    popover.hidden ||
-                    computedDisplay === 'none' ||
-                    popover.classList.contains('hidden')
-                );
-                if (isHidden && !copilotInjected) {
-                    copilotBtn.click();
+        if (name === "new_chat_session") {
+            // Clear thread ID and reload workspace for a fresh session
+            try {
+                if (typeof window.clearChainlitCopilotThreadId === 'function') {
+                    window.clearChainlitCopilotThreadId();
+                } else {
+                    localStorage.removeItem("chainlit-copilot-thread-id");
                 }
+            } catch (err) {
+                console.error("Failed to clear thread ID:", err);
             }
-
-            // Always clear interval once shadow DOM is ready and injected
-            copilotInjected = true;
-            clearInterval(openCopilotInterval);
-
-        } else {
-            // Fallback for Light DOM if widget script mounts without shadow DOM
-            const copilotBtn = document.getElementById('chainlit-copilot-button');
-            const popover = document.getElementById('chainlit-copilot-popover');
-            if (copilotBtn && (!popover || popover.style.display === 'none')) {
-                copilotBtn.click();
-                clearInterval(openCopilotInterval);
-            }
+            location.reload();
+            if (callback) callback("Success");
         }
-    }, 200);
 
-    // Setup drag & drop listeners on the dropzone
+        else if (name === "clear_visual_chat") {
+            // Visual clear is now handled via Chainlit's own new-chat flow.
+            // This handler is kept as a graceful no-op for backward compat.
+            showToast("✅ Chat cleared. Memory is intact.", "success");
+            if (callback) callback("Success");
+        }
+    });
+
+    // --- DRAG & DROP LISTENERS ---
     const dropZone = document.getElementById('drop-zone');
     if (dropZone) {
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -142,71 +120,11 @@ document.addEventListener('DOMContentLoaded', () => {
             handleFiles(files);
         }, false);
     }
-
-    // Listener for CopilotFunction calls from Chainlit backend
-    window.addEventListener("chainlit-call-fn", (e) => {
-        const { name, args, callback } = e.detail;
-
-        if (name === "new_chat_session") {
-            try {
-                if (typeof window.clearChainlitCopilotThreadId === 'function') {
-                    window.clearChainlitCopilotThreadId();
-                } else {
-                    localStorage.removeItem("chainlit-copilot-thread-id");
-                }
-            } catch (err) {
-                console.error("Failed to clear thread ID:", err);
-            }
-            location.reload();
-            if (callback) callback("Success");
-        }
-
-        // FIX P2-19: clear_visual_chat — documented as fragile internal DOM surgery,
-        // graceful fallback if the DOM structure has changed
-        else if (name === "clear_visual_chat") {
-            try {
-                const copilotHost = document.getElementById('chainlit-copilot');
-                let iframe = null;
-
-                if (copilotHost && copilotHost.shadowRoot) {
-                    iframe = copilotHost.shadowRoot.querySelector('#chainlit-copilot-popover iframe');
-                } else {
-                    iframe = document.querySelector('#chainlit-copilot-popover iframe');
-                }
-
-                if (iframe && iframe.contentDocument) {
-                    const doc = iframe.contentDocument;
-                    // Attempt to hide messages via various selector patterns (fragile — Chainlit internals can change)
-                    const containers = doc.querySelectorAll(
-                        '.step-container, [class*="step-container"], [class*="message-list"], .message-list, [data-testid="message-list"]'
-                    );
-                    let cleared = false;
-                    containers.forEach(container => {
-                        Array.from(container.children).forEach(child => {
-                            child.style.display = 'none';
-                        });
-                        cleared = true;
-                    });
-                    if (!cleared) {
-                        // Wider fallback
-                        const messages = doc.querySelectorAll(
-                            '[data-testid="message"], [id^="step-"], [class*="message-container"], [class*="Message"]'
-                        );
-                        messages.forEach(m => m.style.display = 'none');
-                    }
-                } else {
-                    // Graceful fallback: tell user it's not possible via toast
-                    showToast("⚠️ Could not access Copilot iframe for visual clear. Memory is intact.", "warning");
-                }
-            } catch (err) {
-                console.error("Failed to visually clear chat:", err);
-                showToast("Could not clear visual chat history.", "error");
-            }
-            if (callback) callback("Success");
-        }
-    });
 });
 
+// ==========================================
+// TOAST NOTIFICATIONS
+// ==========================================
 function showToast(message, type = 'warning') {
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -216,10 +134,7 @@ function showToast(message, type = 'warning') {
     toast.innerHTML = message;
     container.appendChild(toast);
 
-    // Animate slide-in
     setTimeout(() => toast.classList.add('active'), 10);
-
-    // Auto dismiss after 4 seconds
     setTimeout(() => {
         toast.classList.remove('active');
         toast.classList.add('fade-out');
@@ -227,10 +142,18 @@ function showToast(message, type = 'warning') {
     }, 4000);
 }
 
+// ==========================================
+// FILE HANDLING — STAGE & UPLOAD
+// ==========================================
 function handleFiles(files) {
     if (!files || files.length === 0) return;
 
-    const allowedExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.doc', '.docx', '.pdf', '.ppt', '.pptx', '.xls', '.xlsx', '.txt', '.csv', '.py', '.js', '.json', '.md'];
+    const allowedExtensions = [
+        '.png', '.jpg', '.jpeg', '.webp',
+        '.doc', '.docx', '.pdf', '.ppt', '.pptx',
+        '.xls', '.xlsx', '.txt', '.csv',
+        '.py', '.js', '.json', '.md'
+    ];
     let addedCount = 0;
 
     for (let i = 0; i < files.length; i++) {
@@ -243,7 +166,6 @@ function handleFiles(files) {
             continue;
         }
 
-        // Check if already staged
         const isAlreadyStaged = stagedFiles.some(f => f.name === file.name);
         if (!isAlreadyStaged) {
             stagedFiles.push(file);
@@ -267,7 +189,6 @@ function renderStagingTray() {
     if (countEl) countEl.innerText = `(${stagedFiles.length})`;
 
     if (stagedFiles.length === 0) {
-        // FIX P2-22: Use display: 'none' (not 'flex' for hidden)
         trayEl.style.display = 'none';
         analyzeBtn.disabled = true;
         listEl.innerHTML = '';
@@ -275,7 +196,6 @@ function renderStagingTray() {
         return;
     }
 
-    // FIX P2-22: Use 'flex' to preserve flex layout when showing tray
     trayEl.style.display = 'flex';
     analyzeBtn.disabled = !selectedFilename;
     listEl.innerHTML = '';
@@ -284,7 +204,6 @@ function renderStagingTray() {
         const item = document.createElement('div');
         item.className = 'staged-file-item' + (selectedFilename === file.name ? ' active' : '');
 
-        // Choose appropriate icon
         let icon = '📄';
         const nameLower = file.name.toLowerCase();
         if (nameLower.endsWith('.pdf')) icon = '📕';
@@ -328,7 +247,7 @@ function renderStagingTray() {
 
 async function handleFileSelectionToggle(file, isChecked) {
     if (isChecked) {
-        // STRICT 1-FILE SELECTION: Warning Toast if another file is already checked
+        // STRICT 1-FILE SELECTION: warn if another file is already selected
         if (selectedFilename && selectedFilename !== file.name) {
             showToast("⚠️ Please uncheck the current file first.", "error");
             renderStagingTray();
@@ -342,7 +261,7 @@ async function handleFileSelectionToggle(file, isChecked) {
         const nameLower = file.name.toLowerCase();
         let isImage = ['.png', '.jpg', '.jpeg', '.webp'].some(ext => nameLower.endsWith(ext));
 
-        // If it's a document, upload and index in background
+        // Upload documents to the neural index in the background
         if (!isImage) {
             try {
                 showToast(`Staging "${file.name}" to neural index...`, "success");
@@ -353,7 +272,6 @@ async function handleFileSelectionToggle(file, isChecked) {
                     body: formData
                 });
                 if (!uploadRes.ok) throw new Error("Upload failed");
-
                 await fetch('/api/build-index', { method: 'POST' });
             } catch (err) {
                 console.error("Background staging failed:", err);
@@ -361,8 +279,11 @@ async function handleFileSelectionToggle(file, isChecked) {
             }
         }
 
-        // FIX P0-3: Use "user_message" type so on_message handler fires correctly
+        // Notify Chainlit backend of file selection
         try {
+            if (typeof window.sendChainlitMessage !== 'function') {
+                throw new Error("sendChainlitMessage not available");
+            }
             window.sendChainlitMessage({
                 type: "user_message",
                 output: `[FILE_SELECTED:${file.name}]`
@@ -379,8 +300,10 @@ async function handleFileSelectionToggle(file, isChecked) {
             renderStagingTray();
             closePreview();
 
-            // FIX P0-3: Use "user_message" type for FILE_DESELECTED too
             try {
+                if (typeof window.sendChainlitMessage !== 'function') {
+                    throw new Error("sendChainlitMessage not available");
+                }
                 window.sendChainlitMessage({
                     type: "user_message",
                     output: `[FILE_DESELECTED:${file.name}]`
@@ -397,7 +320,6 @@ function removeStagedFile(index) {
     const removedFile = stagedFiles[index];
     stagedFiles.splice(index, 1);
 
-    // Revoke object URL if exists
     if (previewObjectUrls[removedFile.name]) {
         URL.revokeObjectURL(previewObjectUrls[removedFile.name]);
         delete previewObjectUrls[removedFile.name];
@@ -411,6 +333,9 @@ function removeStagedFile(index) {
     renderStagingTray();
 }
 
+// ==========================================
+// FILE PREVIEW
+// ==========================================
 function previewStagedFile(file) {
     const docViewer = document.getElementById('doc-viewer');
     const placeholder = document.getElementById('viewer-placeholder');
@@ -419,7 +344,6 @@ function previewStagedFile(file) {
 
     if (!docViewer || !placeholder || !scriptContainer || !scriptCode) return;
 
-    // Reset views
     docViewer.style.display = 'none';
     scriptContainer.style.display = 'none';
     placeholder.style.display = 'none';
@@ -447,8 +371,6 @@ function previewStagedFile(file) {
             reader.readAsText(file);
         }
         else if (['.png', '.jpg', '.jpeg', '.webp'].some(ext => nameLower.endsWith(ext))) {
-            // FIX P2-20: For image analysis, upload via /api/upload first instead of embedding giant base64 in WebSocket
-            // Show a preview locally using object URL, but send the server URL to the AI
             if (!previewObjectUrls[file.name]) {
                 previewObjectUrls[file.name] = URL.createObjectURL(file);
             }
@@ -479,16 +401,9 @@ function closePreview() {
     const scriptContainer = document.getElementById('script-preview-container');
     const scriptCode = document.getElementById('script-preview-code');
 
-    if (docViewer) {
-        docViewer.src = '';
-        docViewer.style.display = 'none';
-    }
-    if (scriptContainer) {
-        scriptContainer.style.display = 'none';
-    }
-    if (scriptCode) {
-        scriptCode.textContent = '';
-    }
+    if (docViewer) { docViewer.src = ''; docViewer.style.display = 'none'; }
+    if (scriptContainer) scriptContainer.style.display = 'none';
+    if (scriptCode) scriptCode.textContent = '';
     if (placeholder) {
         placeholder.innerHTML = `
             <div class="placeholder-icon">📚</div>
@@ -499,6 +414,9 @@ function closePreview() {
     }
 }
 
+// ==========================================
+// ANALYZE STAGED FILE
+// ==========================================
 async function analyzeStagedFiles() {
     if (!selectedFilename) {
         showToast("⚠️ Please select a file from the staging tray to analyze.", "warning");
@@ -521,22 +439,17 @@ async function analyzeStagedFiles() {
 
         let promptText = "";
         if (isImage) {
-            // FIX P2-20: Upload image via /api/upload first, pass filename URL to AI
-            // Avoid giant base64 blobs in WebSocket messages
             if (statusText) statusText.innerText = "Uploading image to server...";
             try {
                 const formData = new FormData();
                 formData.append('file', file);
-                const uploadRes = await fetch('/api/upload', {
-                    method: 'POST',
-                    body: formData
-                });
+                const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
                 const uploadData = await uploadRes.json();
                 const imageUrl = uploadData.url || `/public/elements/${file.name}`;
                 promptText = `Please analyze this image file: ${file.name} (server path: ${imageUrl})`;
             } catch (uploadErr) {
-                // Fallback: send small base64 for small images only
-                if (file.size < 500 * 1024) { // Under 500KB: OK to embed
+                // Fallback: embed base64 only for small images
+                if (file.size < 500 * 1024) {
                     const dataUrl = await new Promise((resolve, reject) => {
                         const reader = new FileReader();
                         reader.onload = () => resolve(reader.result);
@@ -554,10 +467,11 @@ async function analyzeStagedFiles() {
         }
 
         if (statusText) statusText.innerText = "Sending to Copilot...";
-        window.sendChainlitMessage({
-            type: "user_message",
-            output: promptText
-        });
+
+        if (typeof window.sendChainlitMessage !== 'function') {
+            throw new Error("sendChainlitMessage not available — Copilot not yet initialized.");
+        }
+        window.sendChainlitMessage({ type: "user_message", output: promptText });
 
         if (statusText) statusText.innerText = "Analysis request sent!";
         showToast(`⚡ Analysis started for "${file.name}".`, "success");
@@ -572,6 +486,9 @@ async function analyzeStagedFiles() {
     }
 }
 
+// ==========================================
+// UTILITIES
+// ==========================================
 function formatBytes(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;

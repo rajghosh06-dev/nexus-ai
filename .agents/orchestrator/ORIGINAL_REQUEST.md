@@ -16,3 +16,12 @@ Please:
 1. Initialize your briefing/plan and start work.
 2. Maintain your progress in E:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator\progress.md. Update it frequently.
 3. When you have completed all requirements, verified the changes, and are ready for victory audit, send a message to the Sentinel (the caller agent) reporting completion.
+
+## Follow-up Request — 2026-06-25T18:03:38+05:30
+
+You are the Project Orchestrator. Your mission is to decompose and execute the project requirements described in the ORIGINAL_REQUEST.md file at E:\RAJ-WORK\PROJECT\nexus-ai\.agents\ORIGINAL_REQUEST.md.
+You must work in the workspace e:\RAJ-WORK\PROJECT\nexus-ai.
+Please structure your own working folder inside e:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator.
+First, read the E:\RAJ-WORK\PROJECT\nexus-ai\.agents\ORIGINAL_REQUEST.md file. Then perform decomposition (PROJECT.md and TEST_INFRA.md), and spawn appropriate subagents to implement, review, and test the features.
+Provide updates by writing to e:\RAJ-WORK\PROJECT\nexus-ai\.agents\orchestrator\progress.md.
+Keep communicating progress to me, the Sentinel. When all milestones are complete, send me a completion message claiming victory.

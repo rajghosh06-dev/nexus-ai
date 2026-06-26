@@ -136,7 +136,6 @@ steps_table = Table(
     Column("defaultOpen", Boolean),
     Column("autoCollapse", Boolean),
     Column("language", String),
-    Column("icon", String)
 )
 
 feedbacks_table = Table(
@@ -144,6 +143,7 @@ feedbacks_table = Table(
     metadata,
     Column("id", String, primary_key=True),
     Column("forId", String, ForeignKey("steps.id", ondelete="CASCADE"), nullable=False),
+    Column("threadId", String, ForeignKey("threads.id", ondelete="CASCADE")),
     Column("value", Integer, nullable=False),
     Column("comment", String)
 )
@@ -160,7 +160,7 @@ elements_table = Table(
     Column("objectKey", String),
     Column("name", String, nullable=False),
     Column("display", String),
-    Column("size", Integer),
+    Column("size", String),
     Column("language", String),
     Column("page", Integer),
     Column("props", String),
@@ -175,17 +175,28 @@ PURGEABLE_TABLES = [elements_table, feedbacks_table, steps_table, threads_table]
 
 
 async def init_db():
-    """Initialize the database, enabling FK enforcement (P1-4 fix)."""
+    """Initialize the database with FK enforcement and incremental schema migrations."""
     async with data_layer.engine.begin() as conn:
-        # FIX P1-4: Enable SQLite foreign key constraints
         await conn.execute(text("PRAGMA foreign_keys = ON"))
         await conn.run_sync(metadata.create_all)
+        # Migration: add threadId to feedbacks table for pre-existing databases
+        try:
+            await conn.execute(text('ALTER TABLE feedbacks ADD COLUMN "threadId" TEXT'))
+            print("[*] DB Migration: Added threadId column to feedbacks table.")
+        except Exception:
+            pass  # Column already exists — safe to ignore
 
 
-# FIX P2-13: Use standard FastAPI startup event to ensure DB initializes correctly
-@fastapi_app.on_event("startup")
-async def startup_event():
-    await init_db()
+# FK enforcement on every new SQLite connection (belt-and-suspenders)
+@sa_event.listens_for(data_layer.engine.sync_engine, "connect")
+def set_sqlite_fk_pragma(dbapi_conn, _):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+# Non-deprecated startup registration pattern
+fastapi_app.router.on_startup.append(init_db)
 
 
 # --- ADAPTERS FOR NATIVE GEMINI SDK WRAPPERS ---
@@ -507,24 +518,46 @@ async def chat_profile():
     return [
         cl.ChatProfile(
             name="Omni Mode",
-            markdown_description="Standard full-capability assistant mode.",
+            markdown_description="**Full-capability** assistant. Access all tools: web search, textbook RAG, and gaming analytics.",
             icon="https://cdn-icons-png.flaticon.com/512/4712/4712035.png",
+            starters=[
+                cl.Starter(label="🌐 Live Web Search", message="Search the web for the current AWS server status and any active outages.", icon="/public/favicon.ico"),
+                cl.Starter(label="📚 Scholar RAG", message="Search the textbooks and explain memory management and virtual memory.", icon="/public/favicon.ico"),
+                cl.Starter(label="🎮 Gamer Ping", message="Check network stability and predict latency for gaming at 8pm.", icon="/public/favicon.ico"),
+                cl.Starter(label="🖼️ Analyze Image", message="I'll upload an image — describe what you see and extract all key information.", icon="/public/favicon.ico"),
+            ]
         ),
         cl.ChatProfile(
             name="Scholar Mode",
-            markdown_description="Focuses on academic and textbook searches.",
+            markdown_description="**Academic focus** — textbook RAG and web research. Optimized for study and deep research.",
             icon="https://cdn-icons-png.flaticon.com/512/3145/3145765.png",
+            starters=[
+                cl.Starter(label="📚 Page Replacement", message="Explain Page Replacement Algorithms (FIFO, LRU, Optimal) with examples.", icon="/public/favicon.ico"),
+                cl.Starter(label="⚙️ CPU Scheduling", message="Compare Round Robin vs Priority scheduling with pros and cons.", icon="/public/favicon.ico"),
+                cl.Starter(label="🧮 Search Algorithms", message="Explain Binary Search Tree insertion, deletion, and traversal operations.", icon="/public/favicon.ico"),
+                cl.Starter(label="🌐 Research Topic", message="Search the web and textbooks for recent advances in transformer architectures.", icon="/public/favicon.ico"),
+            ]
         ),
         cl.ChatProfile(
             name="Gamer Mode",
-            markdown_description="Focuses on gaming ping, servers and network stability.",
+            markdown_description="**Gaming analytics** — network stability, ping prediction, and live server status checks.",
             icon="https://cdn-icons-png.flaticon.com/512/808/808439.png",
+            starters=[
+                cl.Starter(label="🎮 Check Ping Now", message="Check network ping for my current gaming session stability.", icon="/public/favicon.ico"),
+                cl.Starter(label="🌐 Server Status", message="Search the web for current game server status and any outages.", icon="/public/favicon.ico"),
+                cl.Starter(label="📊 Peak Hour Latency", message="Predict latency for hour 20 and suggest optimal gaming windows.", icon="/public/favicon.ico"),
+                cl.Starter(label="⚡ Best Play Time", message="Analyze today's full latency predictions and find the best gaming window.", icon="/public/favicon.ico"),
+            ]
         ),
         cl.ChatProfile(
             name="Voice Mode",
-            markdown_description="Audio processing mode using Whisper.",
+            markdown_description="**Audio processing** — speak via Whisper transcription with full AI response.",
             icon="https://cdn-icons-png.flaticon.com/512/709/709682.png",
-        )
+            starters=[
+                cl.Starter(label="🎙️ Start Voice", message="I'm ready to use voice mode. I'll speak my next query.", icon="/public/favicon.ico"),
+                cl.Starter(label="📝 Transcribe Audio", message="Please transcribe the audio I'm about to upload.", icon="/public/favicon.ico"),
+            ]
+        ),
     ]
 
 
@@ -652,6 +685,23 @@ async def start_chat():
     except Exception as e:
         print(f"[-] Slash commands register error: {e}")
 
+    # Modes picker — per-message tool routing supplement to slash commands
+    try:
+        await cl.context.emitter.set_modes([
+            cl.Mode(
+                id="tool_focus",
+                name="Focus",
+                options=[
+                    cl.ModeOption(id="auto", name="Auto", default=True),
+                    cl.ModeOption(id="scholar", name="Scholar"),
+                    cl.ModeOption(id="gamer", name="Gamer"),
+                    cl.ModeOption(id="web", name="Web"),
+                ]
+            )
+        ])
+    except Exception as e:
+        print(f"[-] Modes setup error: {e}")
+
     mode_icons = {
         "Scholar Mode": "📚",
         "Gamer Mode": "🎮",
@@ -665,7 +715,7 @@ async def start_chat():
   <div class="nx-mode-badge">{mode_icon} {chat_profile_name}</div>
   <h1>⚡ NexusAI</h1>
   <p><strong>Dual-Engine AI Ready</strong> — Scholar 📚 · Gamer 🎮 · Omni 🌐</p>
-  <p style="margin-top:10px;font-size:13px;color:#8ba3c7;">Upload images, PDFs, code files &amp; documents · Use <code>/scholar</code>, <code>/gamer</code>, <code>/web</code> slash commands</p>
+  <p class="nx-welcome-desc" style="margin-top:10px;font-size:13px;">Upload images, PDFs, code files &amp; documents · Use <code>/scholar</code>, <code>/gamer</code>, <code>/web</code> slash commands</p>
 </div>"""
 
     try:
@@ -677,21 +727,55 @@ async def start_chat():
 @cl.on_chat_resume
 async def on_chat_resume(thread):
     cl.user_session.set("session_id", cl.user_session.get("id"))
-    chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
-    
-    # We reconstruct the message history from the resumed thread
+
+    # Restore chat profile from thread metadata (persisted at session start)
+    thread_meta = thread.get("metadata") or {}
+    if isinstance(thread_meta, str):
+        try:
+            thread_meta = json.loads(thread_meta)
+        except Exception:
+            thread_meta = {}
+    chat_profile_name = (
+        thread_meta.get("chat_profile")
+        or cl.user_session.get("chat_profile")
+        or "Omni Mode"
+    )
+    cl.user_session.set("chat_profile", chat_profile_name)
+
+    # Re-register commands and modes for the resumed session
+    try:
+        await cl.context.emitter.set_modes([
+            cl.Mode(
+                id="tool_focus",
+                name="Focus",
+                options=[
+                    cl.ModeOption(id="auto", name="Auto", default=True),
+                    cl.ModeOption(id="scholar", name="Scholar"),
+                    cl.ModeOption(id="gamer", name="Gamer"),
+                    cl.ModeOption(id="web", name="Web"),
+                ]
+            )
+        ])
+    except Exception:
+        pass
+
+    # Reconstruct message history from persisted thread steps
     message_history = []
-    
-    system_instruction = f"You are NexusAI, a dual-engine Scholar-Gamer CoPilot. Maintain deep context awareness. Your current profile is {chat_profile_name}."
+    system_instruction = (
+        f"You are NexusAI, a dual-engine Scholar-Gamer CoPilot. "
+        f"Maintain deep context awareness. Your current profile is {chat_profile_name}."
+    )
     message_history.append({"role": "system", "content": system_instruction})
-    
-    for step in thread["steps"]:
-        if step["type"] == "user_message":
-            message_history.append({"role": "user", "content": step.get("output", "")})
-        elif step["type"] == "assistant_message":
-            message_history.append({"role": "assistant", "content": step.get("output", "")})
-            
-    cl.user_session.set("message_history", message_history)
+
+    for step in thread.get("steps", []):
+        step_type = step.get("type", "")
+        step_output = step.get("output") or ""
+        if step_type == "user_message" and step_output:
+            message_history.append({"role": "user", "content": step_output})
+        elif step_type == "assistant_message" and step_output:
+            message_history.append({"role": "assistant", "content": step_output})
+
+    cl.user_session.set("message_history", sanitize_history_for_storage(message_history))
 
 
 @cl.on_chat_end
@@ -714,6 +798,30 @@ async def end_chat():
             await loop.run_in_executor(None, build_vector_database)
         except Exception as e:
             print(f"[-] RAG cleanup index rebuild failed: {e}")
+
+
+@cl.on_stop
+async def on_stop():
+    """Called when the user clicks the Stop button mid-generation."""
+    cl.user_session.set("should_stop", True)
+
+
+@cl.on_logout
+async def on_logout(user: cl.User, response):
+    """Called on explicit logout — allows cleanup hooks."""
+    print(f"[*] User {user.identifier} logged out cleanly.")
+
+
+@cl.author_rename
+async def rename_author(orig_author: str):
+    """Rename chat authors for branded NexusAI display."""
+    rename_map = {
+        "Chatbot": "NexusAI",
+        "Assistant": "NexusAI",
+        "Tool": "⚙️ NexusAI Tools",
+        "Error": "⚠️ System",
+    }
+    return rename_map.get(orig_author, orig_author)
 
 
 # --- CUSTOM API ENDPOINTS FOR WORKSPACE ---
@@ -1045,6 +1153,17 @@ async def handle_message(message: cl.Message):
         elif message.command == "web":
             tool_choice = {"type": "function", "function": {"name": "execute_web_search"}}
 
+        # Supplement slash commands with Modes picker selection
+        if not tool_choice:
+            active_mode = (getattr(message, 'modes', None) or {}).get("tool_focus", "auto")
+            mode_to_tool = {
+                "scholar": "query_academic_textbooks",
+                "gamer": "check_game_network_stability",
+                "web": "execute_web_search",
+            }
+            if active_mode in mode_to_tool:
+                tool_choice = {"type": "function", "function": {"name": mode_to_tool[active_mode]}}
+
         attached_text = ""
         image_contents = []
 
@@ -1201,14 +1320,17 @@ async def handle_message(message: cl.Message):
             await response_msg.send()
             full_response = ""
             for chunk in streamed_completion:
+                if cl.user_session.get("should_stop"):
+                    cl.user_session.set("should_stop", False)
+                    break
                 text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
                 full_response += text_tok
                 await response_msg.stream_token(text_tok)
             history.append({"role": "assistant", "content": full_response})
             actions = [
-                cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
-                cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
-                cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
+                cl.Action(name="regenerate_answer", label="🔄 Regenerate", icon="refresh-cw", payload={"action": "regenerate"}),
+                cl.Action(name="verify_citations", label="📄 Verify Citations", icon="file-check", payload={"action": "verify"}),
+                cl.Action(name="search_web_instead", label="🌐 Search Web", icon="globe", payload={"action": "search_web"})
             ]
             response_msg.actions = actions
             if chat_profile_name == "Voice Mode":
@@ -1280,15 +1402,18 @@ async def handle_message(message: cl.Message):
                 await response_msg.send()
                 full_response = ""
                 for chunk in final_completion:
+                    if cl.user_session.get("should_stop"):
+                        cl.user_session.set("should_stop", False)
+                        break
                     text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
                     full_response += text_tok
                     await response_msg.stream_token(text_tok)
                 history.append({"role": "assistant", "content": full_response})
 
                 actions = [
-                    cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
-                    cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
-                    cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
+                    cl.Action(name="regenerate_answer", label="🔄 Regenerate", icon="refresh-cw", payload={"action": "regenerate"}),
+                    cl.Action(name="verify_citations", label="📄 Verify Citations", icon="file-check", payload={"action": "verify"}),
+                    cl.Action(name="search_web_instead", label="🌐 Search Web", icon="globe", payload={"action": "search_web"})
                 ]
                 response_msg.actions = actions
 
@@ -1316,14 +1441,17 @@ async def handle_message(message: cl.Message):
                 await response_msg.send()
                 full_response = ""
                 for chunk in streamed_completion:
+                    if cl.user_session.get("should_stop"):
+                        cl.user_session.set("should_stop", False)
+                        break
                     text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
                     full_response += text_tok
                     await response_msg.stream_token(text_tok)
                 history.append({"role": "assistant", "content": full_response})
                 actions = [
-                    cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
-                    cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
-                    cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
+                    cl.Action(name="regenerate_answer", label="🔄 Regenerate", icon="refresh-cw", payload={"action": "regenerate"}),
+                    cl.Action(name="verify_citations", label="📄 Verify Citations", icon="file-check", payload={"action": "verify"}),
+                    cl.Action(name="search_web_instead", label="🌐 Search Web", icon="globe", payload={"action": "search_web"})
                 ]
                 response_msg.actions = actions
                 if chat_profile_name == "Voice Mode":
@@ -1359,9 +1487,9 @@ async def on_regenerate(action: cl.Action):
         history.append({"role": "assistant", "content": full_response})
         cl.user_session.set("message_history", sanitize_history_for_storage(history))
         actions = [
-            cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
-            cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
-            cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
+            cl.Action(name="regenerate_answer", label="🔄 Regenerate", icon="refresh-cw", payload={"action": "regenerate"}),
+            cl.Action(name="verify_citations", label="📄 Verify Citations", icon="file-check", payload={"action": "verify"}),
+            cl.Action(name="search_web_instead", label="🌐 Search Web", icon="globe", payload={"action": "search_web"})
         ]
         response_msg.actions = actions
         rag_content = cl.user_session.get("last_rag_result")
@@ -1425,9 +1553,9 @@ async def on_search_web_instead(action: cl.Action):
         history.append({"role": "assistant", "content": full_response})
         cl.user_session.set("message_history", sanitize_history_for_storage(history))
         actions = [
-            cl.Action(name="regenerate_answer", value="regenerate_action", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
-            cl.Action(name="verify_citations", value="verify_action", label="📄 Verify Citations", payload={"action": "verify"}),
-            cl.Action(name="search_web_instead", value="search_web_action", label="🌐 Search Web Instead", payload={"action": "search_web"})
+            cl.Action(name="regenerate_answer", label="🔄 Regenerate", icon="refresh-cw", payload={"action": "regenerate"}),
+            cl.Action(name="verify_citations", label="📄 Verify Citations", icon="file-check", payload={"action": "verify"}),
+            cl.Action(name="search_web_instead", label="🌐 Search Web", icon="globe", payload={"action": "search_web"})
         ]
         response_msg.actions = actions
         chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
