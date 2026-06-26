@@ -32,7 +32,7 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from sqlalchemy import MetaData, Table, Column, String, Boolean, Integer, ForeignKey, event as sa_event
 from sqlalchemy import text
 import aiofiles
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, List, Optional, Sequence
 from chainlit.data.storage_clients.base import BaseStorageClient
 
 
@@ -53,9 +53,12 @@ class LocalStorageClient(BaseStorageClient):
     ) -> Dict[str, Any]:
         file_path = os.path.join(self.base_dir, object_key)
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        mode = "w" if isinstance(data, str) else "wb"
-        async with aiofiles.open(file_path, mode) as f:
-            await f.write(data)
+        if isinstance(data, str):
+            async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+                await f.write(data)
+        else:
+            async with aiofiles.open(file_path, "wb") as f:
+                await f.write(data)
         url = f"{self.base_url}/{object_key}"
         return {"object_key": object_key, "url": url}
 
@@ -269,7 +272,7 @@ try:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         import google.generativeai as genai
-    genai.configure(api_key=API_KEY_GEMINI)
+    getattr(genai, "configure")(api_key=API_KEY_GEMINI)
     gemini_client = genai
 except Exception as e:
     print(f"[-] Client initialization error: {e}")
@@ -489,8 +492,10 @@ def sanitize_history_for_storage(history_array):
     for msg in history_array:
         msg_dict = message_to_dict(msg)
         if isinstance(msg_dict.get("content"), list):
-            text_only = next((c["text"] for c in msg_dict["content"] if c.get("type") == "text"),
-                             "[Image Omitted for Storage]")
+            text_only = next(
+                (c.get("text", "") for c in msg_dict["content"] if isinstance(c, dict) and c.get("type") == "text"),
+                "[Image Omitted for Storage]"
+            )
             msg_dict["content"] = text_only
         clean_history.append(msg_dict)
     return clean_history
@@ -585,12 +590,12 @@ async def auth_callback(username: str, password: str):
     try:
         existing_user = await data_layer.get_user(username)
         if existing_user:
-            return cl.User(id=existing_user.id, identifier=existing_user.identifier, metadata=existing_user.metadata)
+            return cl.User(identifier=existing_user.identifier, metadata=existing_user.metadata)
         else:
             new_user = cl.User(identifier=username, metadata={"type": "passwordless"})
             persisted_user = await data_layer.create_user(new_user)
             if persisted_user:
-                return cl.User(id=persisted_user.id, identifier=persisted_user.identifier, metadata=persisted_user.metadata)
+                return cl.User(identifier=persisted_user.identifier, metadata=persisted_user.metadata)
             return None
     except Exception as e:
         print(f"[-] Auth callback database error: {e}")
@@ -614,7 +619,7 @@ async def start_chat():
                 ORDER BY "createdAt" DESC
             """
             threads = await data_layer.execute_sql(query=query, parameters={"identifier": identifier})
-            if threads and len(threads) > 3:
+            if isinstance(threads, list) and len(threads) > 3:
                 for old_thread in threads[3:]:
                     tid = old_thread["id"]
                     try:
@@ -640,7 +645,7 @@ async def start_chat():
                 timeout=120
             ).send()
             if res:
-                game_context = f"\nUser is currently playing: {res['output']}"
+                game_context = f"\nUser is currently playing: {res.get('output', '')}"
         except Exception as e:
             print(f"[-] Gamer start profile error: {e}")
 
@@ -691,7 +696,7 @@ async def start_chat():
         {"id": "new", "icon": "bolt", "description": "Factory Reset (Wipes session data, keeps accounts)"}
     ]
     try:
-        await cl.context.emitter.set_commands(commands)
+        await cl.context.emitter.set_commands(commands) # type: ignore
     except Exception as e:
         print(f"[-] Slash commands register error: {e}")
 
@@ -840,7 +845,7 @@ async def rename_author(orig_author: str):
 async def upload_document(file: UploadFile = File(...)):
     try:
         # FIX P3-23: Sanitize filename to prevent path traversal
-        safe_name = pathlib.Path(file.filename).name
+        safe_name = pathlib.Path(file.filename or "uploaded_file").name
         textbooks_dir = os.path.join(os.path.dirname(__file__), "data", "textbooks")
         os.makedirs(textbooks_dir, exist_ok=True)
         file_path = os.path.join(textbooks_dir, safe_name)
@@ -1013,7 +1018,7 @@ async def auto_rename_session(history):
                     ]
                 )
             )
-            title = completion.choices[0].message.content.strip().replace('"', '').replace("'", "")
+            title = (completion.choices[0].message.content or "").strip().replace('"', '').replace("'", "")
             thread_id = cl.context.session.thread_id
             layer = cl_data.get_data_layer()
             if thread_id and layer:
@@ -1055,9 +1060,10 @@ async def add_voice_to_response(response_msg, full_response):
 @cl.on_message
 async def handle_message(message: cl.Message):
     try:
-        history = [message_to_dict(m) for m in cl.user_session.get("message_history", [])]
+        history_raw = cl.user_session.get("message_history")
+        history = [message_to_dict(m) for m in history_raw] if history_raw else []
         
-        custom_sys_prompt = cl.user_session.get("system_prompt", "").strip()
+        custom_sys_prompt = (cl.user_session.get("system_prompt") or "").strip()
         if custom_sys_prompt and history and history[0].get("role") == "system":
             history[0]["content"] = history[0]["content"] + f"\n\n[USER CUSTOM INSTRUCTION]: {custom_sys_prompt}"
 
@@ -1113,7 +1119,7 @@ async def handle_message(message: cl.Message):
             if not digits:
                 ask_msg = await cl.AskUserMessage(content="What hour (0-23)?", timeout=60).send()
                 if ask_msg:
-                    ans_digits = re.findall(r'\d+', ask_msg['output'])
+                    ans_digits = re.findall(r'\d+', ask_msg.get('output', ''))
                     hour_val = int(ans_digits[0]) if ans_digits else datetime.now().hour
                 else:
                     hour_val = datetime.now().hour
@@ -1199,6 +1205,9 @@ async def handle_message(message: cl.Message):
             for element in message.elements:
                 try:
                     name_lower = element.name.lower() if hasattr(element, "name") and element.name else ""
+                    el_path = getattr(element, "path", None)
+                    if not isinstance(el_path, str):
+                        continue
 
                     # Text / Code files
                     if name_lower.endswith(('.txt', '.py', '.js', '.ts', '.jsx', '.tsx',
@@ -1206,7 +1215,7 @@ async def handle_message(message: cl.Message):
                                             '.sh', '.yaml', '.yml', '.toml', '.ini',
                                             '.xml', '.sql', '.rs', '.go', '.c', '.cpp',
                                             '.h', '.java', '.kt', '.swift', '.rb')):
-                        with open(element.path, "r", encoding="utf-8", errors="replace") as f:
+                        with open(el_path, "r", encoding="utf-8", errors="replace") as f:
                             file_content = f.read()
                         ext = name_lower.rsplit('.', 1)[-1]
                         attached_text += f"\n\n--- {ext.upper()} File: {element.name} ---\n```{ext}\n{file_content}\n```"
@@ -1214,23 +1223,23 @@ async def handle_message(message: cl.Message):
                     # Word documents
                     elif name_lower.endswith(('.docx', '.doc')):
                         import docx
-                        doc = docx.Document(element.path)
+                        doc = docx.Document(el_path)
                         text_content = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
                         attached_text += f"\n\n--- Word Document: {element.name} ---\n{text_content}"
 
                     # PowerPoint presentations
                     elif name_lower.endswith(('.pptx', '.ppt')):
                         import pptx
-                        prs = pptx.Presentation(element.path)
+                        prs = pptx.Presentation(el_path)
                         text_content = "\n".join(
-                            [shape.text for slide in prs.slides for shape in slide.shapes
-                             if hasattr(shape, "text") and shape.text.strip()])
+                            [getattr(shape, "text", "") for slide in prs.slides for shape in slide.shapes
+                             if hasattr(shape, "text") and getattr(shape, "text", "").strip()])
                         attached_text += f"\n\n--- Presentation: {element.name} ({len(prs.slides)} slides) ---\n{text_content}"
 
                     # PDF documents
                     elif name_lower.endswith('.pdf'):
                         import PyPDF2
-                        with open(element.path, "rb") as f:
+                        with open(el_path, "rb") as f:
                             reader = PyPDF2.PdfReader(f)
                             pages_text = [page.extract_text() for page in reader.pages if page.extract_text()]
                             text_content = "\n\n".join(pages_text)
@@ -1239,7 +1248,7 @@ async def handle_message(message: cl.Message):
                     # Excel / spreadsheets
                     elif name_lower.endswith(('.xlsx', '.xls', '.ods')):
                         import pandas as pd
-                        xls = pd.ExcelFile(element.path)
+                        xls = pd.ExcelFile(el_path)
                         sheet_texts = []
                         for sheet_name in xls.sheet_names:
                             df = pd.read_excel(xls, sheet_name=sheet_name)
@@ -1249,7 +1258,7 @@ async def handle_message(message: cl.Message):
 
                     # Images — send to vision LLM
                     elif name_lower.endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')):
-                        with open(element.path, "rb") as img_file:
+                        with open(el_path, "rb") as img_file:
                             img_bytes = img_file.read()
                         base64_image = base64.b64encode(img_bytes).decode('utf-8')
                         # Determine correct MIME type
@@ -1266,7 +1275,7 @@ async def handle_message(message: cl.Message):
                     elif name_lower.endswith(('.mp3', '.wav', '.ogg', '.m4a', '.flac', '.webm')):
                         try:
                             loop = asyncio.get_running_loop()
-                            with open(element.path, "rb") as audio_file:
+                            with open(el_path, "rb") as audio_file:
                                 audio_bytes = audio_file.read()
                             transcription = await loop.run_in_executor(
                                 None,
@@ -1372,7 +1381,7 @@ async def handle_message(message: cl.Message):
                                 ask_msg = await cl.AskUserMessage(content="What hour (0-23)?", timeout=60).send()
                                 if ask_msg:
                                     try:
-                                        digits = "".join(filter(str.isdigit, ask_msg['output']))
+                                        digits = "".join(filter(str.isdigit, ask_msg.get('output', '')))
                                         hour_val = int(digits)
                                         if not (0 <= hour_val <= 23):
                                             hour_val = datetime.now().hour
@@ -1389,9 +1398,11 @@ async def handle_message(message: cl.Message):
                             cl.user_session.set("last_rag_sources", sources)
                             elements: List[Any] = [cl.Text(name="Source", content=tool_content, display="inline")]
                             for src in sources:
+                                if not isinstance(src, str):
+                                    continue
                                 src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
                                 if os.path.exists(src_path):
-                                    if isinstance(src, str) and src.lower().endswith(".pdf"):
+                                    if src.lower().endswith(".pdf"):
                                         elements.append(cl.Pdf(name=src, path=src_path, display="side"))
                                     else:
                                         # FIX P2-12: cl.Text has no path param — read content or use cl.File
@@ -1438,8 +1449,10 @@ async def handle_message(message: cl.Message):
                     elements.append(cl.Text(name="Source", content=rag_content, display="side"))
                     rag_sources = cl.user_session.get("last_rag_sources") or []
                     for src in rag_sources:
+                        if not isinstance(src, str):
+                            continue
                         src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
-                        if os.path.exists(src_path) and isinstance(src, str) and src.lower().endswith(".pdf"):
+                        if os.path.exists(src_path) and src.lower().endswith(".pdf"):
                             elements.append(cl.Pdf(name=src, path=src_path, display="side"))
                     cl.user_session.set("last_rag_result", None)
                     cl.user_session.set("last_rag_sources", None)
@@ -1513,8 +1526,10 @@ async def on_regenerate(action: cl.Action):
             elements.append(cl.Text(name="Source", content=rag_content, display="side"))
             sources = cl.user_session.get("last_rag_sources") or []
             for src in sources:
+                if not isinstance(src, str):
+                    continue
                 src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
-                if os.path.exists(src_path) and isinstance(src, str) and src.lower().endswith(".pdf"):
+                if os.path.exists(src_path) and src.lower().endswith(".pdf"):
                     elements.append(cl.Pdf(name=src, path=src_path, display="side"))
             cl.user_session.set("last_rag_result", None)
             cl.user_session.set("last_rag_sources", None)
@@ -1596,9 +1611,12 @@ async def on_verify_citations(action: cl.Action):
 @cl.action_callback("resume_session")
 async def execute_resume_session(action: cl.Action):
     session_id = action.payload.get("session_id")
+    if not isinstance(session_id, str):
+        return
     try:
         layer = cl_data.get_data_layer()
-        thread = await layer.get_thread(session_id)
+        if layer:
+            thread = await layer.get_thread(session_id)
         if thread:
             history = [{"role": msg.get("role") or msg.get("type", "").split("_")[0], "content": msg.get("content") or msg.get("output", "")} for msg in thread.get("steps", []) if msg.get("type") in ("user_message", "assistant_message")]
             cl.user_session.set("message_history", history)
