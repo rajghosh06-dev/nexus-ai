@@ -25,12 +25,30 @@ venv/
 env/
 .conda/
 
+<<<<<<< HEAD
+# Local Database & SQLite files
+chainlit.db
+chainlit.db-journal
+chainlit.db-wal
+chainlit.db-shm
+*.sqlite
+*.db
+
+# Data & AI Assets
+#models/
+=======
 # ---- Data directories (local only) ----
+>>>>>>> 9c6a27638e14babc1e7847df87a70d01416b4be0
 data/
 vector_store/
 chromadb/
 faiss_index/
 
+<<<<<<< HEAD
+# Chainlit Runtime Config & Workspace Uploads
+#.chainlit/
+public/elements/
+=======
 # ---- Chainlit local database & state ----
 chainlit.db
 chainlit.db-shm
@@ -96,3 +114,4 @@ temp/
 *.bak
 *.swp
 *~
+>>>>>>> 9c6a27638e14babc1e7847df87a70d01416b4be0
