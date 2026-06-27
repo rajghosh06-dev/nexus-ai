@@ -1,4 +1,5 @@
 import os
+import json
 import pathlib
 import hashlib
 import json
@@ -16,10 +17,12 @@ from fastapi import Request, Response
 # Load environment variables first
 load_dotenv()
 
-from duckduckgo_search import DDGS
+import warnings
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    from duckduckgo_search import DDGS
 
 # Import backend modules
-from src.latency_predictor import predict_latency
 from src.rag_scholar import search_textbooks_with_sources, build_vector_database
 from chainlit.server import app as fastapi_app
 from fastapi import UploadFile, File, Response
@@ -79,14 +82,36 @@ class LocalStorageClient(BaseStorageClient):
 # Configure Storage Provider
 storage_provider = LocalStorageClient()
 
+import sqlite3
+import json
+
+# Intercept and serialize Python objects for SQLite compatibility
+sqlite3.register_adapter(list, lambda lst: json.dumps(lst))
+sqlite3.register_adapter(dict, lambda dct: json.dumps(dct))
+
+def initialize_database_raw():
+    db_path = "chainlit.db"
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    # Explicitly create all required tables
+    cursor.execute('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, identifier TEXT UNIQUE, createdAt TEXT, metadata TEXT)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, createdAt TEXT, name TEXT, userId TEXT, userIdentifier TEXT, tags TEXT, metadata TEXT)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS steps (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, threadId TEXT NOT NULL, parentId TEXT, command TEXT, modes TEXT, streaming BOOLEAN NOT NULL, waitForAnswer BOOLEAN, isError BOOLEAN, metadata TEXT, tags TEXT, input TEXT, output TEXT, createdAt TEXT, start TEXT, end TEXT, generation TEXT, showInput TEXT, defaultOpen BOOLEAN, autoCollapse BOOLEAN, language TEXT)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS feedbacks (id TEXT PRIMARY KEY, forId TEXT NOT NULL, threadId TEXT, value INTEGER NOT NULL, comment TEXT)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS elements (id TEXT PRIMARY KEY, threadId TEXT, type TEXT, chainlitKey TEXT, path TEXT, url TEXT, objectKey TEXT, name TEXT NOT NULL, display TEXT, size TEXT, language TEXT, page INTEGER, props TEXT, autoPlay BOOLEAN, playerConfig TEXT, forId TEXT, mime TEXT)')
+    
+    # Dual-Tier Memory Tables
+    cursor.execute('CREATE TABLE IF NOT EXISTS user_primary_memory (user_id TEXT PRIMARY KEY, username TEXT, first_name TEXT, last_name TEXT, current_model TEXT, current_mode TEXT, updated_at TEXT)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS user_secondary_memory (user_id TEXT, pref_key TEXT, pref_value TEXT, PRIMARY KEY (user_id, pref_key))')
+    
+    conn.commit()
+    conn.close()
+
+# Invoke immediately to guarantee schema exists before SQLAlchemy hits it
+initialize_database_raw()
+
 class NexusDataLayer(SQLAlchemyDataLayer):
-    async def execute_sql(self, query: str, parameters: dict):
-        if parameters:
-            if "modes" in parameters and not isinstance(parameters["modes"], str) and parameters["modes"] is not None:
-                parameters["modes"] = json.dumps(parameters["modes"])
-            if "tags" in parameters and not isinstance(parameters["tags"], str) and parameters["tags"] is not None:
-                parameters["tags"] = json.dumps(parameters["tags"])
-        return await super().execute_sql(query, parameters)
+    pass
 
 # Configure Data Layer globally
 # FIX P1-11: Remove direct cl_data._data_layer assignment; use only @cl.data_layer decorator
@@ -100,116 +125,6 @@ def get_data_layer():
     return data_layer
 
 
-# --- DATABASE SCHEMA DEFINITION ---
-metadata = MetaData()
-
-users_table = Table(
-    "users",
-    metadata,
-    Column("id", String, primary_key=True),
-    Column("identifier", String, unique=True, nullable=False),
-    Column("createdAt", String),
-    Column("metadata", String)
-)
-
-threads_table = Table(
-    "threads",
-    metadata,
-    Column("id", String, primary_key=True),
-    Column("createdAt", String),
-    Column("name", String),
-    Column("userId", String, ForeignKey("users.id", ondelete="CASCADE")),
-    Column("userIdentifier", String),
-    Column("tags", String),
-    Column("metadata", String)
-)
-
-steps_table = Table(
-    "steps",
-    metadata,
-    Column("id", String, primary_key=True),
-    Column("name", String, nullable=False),
-    Column("type", String, nullable=False),
-    Column("threadId", String, ForeignKey("threads.id", ondelete="CASCADE"), nullable=False),
-    Column("parentId", String),
-    Column("command", String),
-    Column("modes", String),
-    Column("streaming", Boolean, nullable=False),
-    Column("waitForAnswer", Boolean),
-    Column("isError", Boolean),
-    Column("metadata", String),
-    Column("tags", String),
-    Column("input", String),
-    Column("output", String),
-    Column("createdAt", String),
-    Column("start", String),
-    Column("end", String),
-    Column("generation", String),
-    Column("showInput", String),
-    Column("defaultOpen", Boolean),
-    Column("autoCollapse", Boolean),
-    Column("language", String),
-)
-
-feedbacks_table = Table(
-    "feedbacks",
-    metadata,
-    Column("id", String, primary_key=True),
-    Column("forId", String, ForeignKey("steps.id", ondelete="CASCADE"), nullable=False),
-    Column("threadId", String, ForeignKey("threads.id", ondelete="CASCADE")),
-    Column("value", Integer, nullable=False),
-    Column("comment", String)
-)
-
-elements_table = Table(
-    "elements",
-    metadata,
-    Column("id", String, primary_key=True),
-    Column("threadId", String, ForeignKey("threads.id", ondelete="CASCADE")),
-    Column("type", String),
-    Column("chainlitKey", String),
-    Column("path", String),
-    Column("url", String),
-    Column("objectKey", String),
-    Column("name", String, nullable=False),
-    Column("display", String),
-    Column("size", String),
-    Column("language", String),
-    Column("page", Integer),
-    Column("props", String),
-    Column("autoPlay", Boolean),
-    Column("playerConfig", String),
-    Column("forId", String),
-    Column("mime", String)
-)
-
-# Tables that can be safely purged without destroying user accounts
-PURGEABLE_TABLES = [elements_table, feedbacks_table, steps_table, threads_table]
-
-
-async def init_db():
-    """Initialize the database with FK enforcement and incremental schema migrations."""
-    async with data_layer.engine.begin() as conn:
-        await conn.execute(text("PRAGMA foreign_keys = ON"))
-        await conn.run_sync(metadata.create_all)
-        # Migration: add threadId to feedbacks table for pre-existing databases
-        try:
-            await conn.execute(text('ALTER TABLE feedbacks ADD COLUMN "threadId" TEXT'))
-            print("[*] DB Migration: Added threadId column to feedbacks table.")
-        except Exception:
-            pass  # Column already exists — safe to ignore
-
-
-# FK enforcement on every new SQLite connection (belt-and-suspenders)
-@sa_event.listens_for(data_layer.engine.sync_engine, "connect")
-def set_sqlite_fk_pragma(dbapi_conn, _):
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
-
-
-# Non-deprecated startup registration pattern
-fastapi_app.router.on_startup.append(init_db)
 
 
 # --- ADAPTERS FOR NATIVE GEMINI SDK WRAPPERS ---
@@ -225,7 +140,7 @@ class OpenAIChunk:
     def __init__(self, content):
         self.choices = [OpenAIChunkChoice(OpenAIChunkDelta(content))]
 
-def wrap_gemini_stream(gemini_stream):
+async def wrap_gemini_stream(gemini_stream):
     for chunk in gemini_stream:
         try:
             yield OpenAIChunk(chunk.text)
@@ -279,22 +194,7 @@ except Exception as e:
 
 
 TOOLS_SCHEMA = [
-    {
-        "type": "function",
-        "function": {
-            "name": "check_game_network_stability",
-            "description": "Predicts network latency (ping) or server stability for a given hour.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "hour": {
-                        "type": "integer",
-                        "description": "The hour of the day (0-23) for which to predict latency."
-                    }
-                }
-            }
-        }
-    },
+
     {
         "type": "function",
         "function": {
@@ -305,7 +205,8 @@ TOOLS_SCHEMA = [
                 "properties": {
                     "search_query": {"type": "string"}
                 },
-                "required": ["search_query"]
+                "required": ["search_query"],
+                "additionalProperties": False
             }
         }
     },
@@ -319,7 +220,29 @@ TOOLS_SCHEMA = [
                 "properties": {
                     "query": {"type": "string"}
                 },
-                "required": ["query"]
+                "required": ["query"],
+                "additionalProperties": False
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_user_memory",
+            "description": "Use this tool whenever the user explicitly states a permanent fact about themselves (e.g., their name, their profession, a strict preference). This saves the fact to their global profile.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact_key": {
+                        "type": "string",
+                        "description": "The key under which to store the fact, e.g., 'name', 'profession'"
+                    },
+                    "fact_value": {
+                        "type": "string",
+                        "description": "The value of the fact to store."
+                    }
+                },
+                "required": ["fact_key", "fact_value"]
             }
         }
     }
@@ -335,31 +258,30 @@ def perform_web_search(query):
     except Exception as e:
         return f"Web search failed: {str(e)}"
 
-
 async def perform_web_search_async(query: str) -> str:
-    """FIX P1-9: Wrap synchronous DDGS search in executor to avoid event-loop blocking."""
+    """Wrap synchronous DDGS search in executor to avoid event-loop blocking."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: perform_web_search(query))
 
 
 async def call_llm_with_fallback(messages, tools=None, tool_choice=None, temperature=None, vision_mode=False, requested_model=None):
+    # 1. Define clean routes (No decommissioned models)
     if vision_mode:
         MODELS_ROUTE = [
-            {"provider": "Groq", "client": groq_client, "model": "llama-3.2-90b-vision-preview"},
-            {"provider": "Gemini", "client": gemini_client, "model": "gemini-1.5-flash"}
+            {"provider": "Gemini", "client": gemini_client, "model": "gemini-1.5-pro"}
         ]
         tools = None
     else:
         MODELS_ROUTE = []
         if requested_model:
-            # Inject requested model at the front
             provider = "Gemini" if "gemini" in requested_model else "Groq"
             client = gemini_client if provider == "Gemini" else groq_client
             MODELS_ROUTE.append({"provider": provider, "client": client, "model": requested_model})
-            
+        
+        # Base stable route
         MODELS_ROUTE.extend([
             {"provider": "Groq", "client": groq_client, "model": "llama-3.3-70b-versatile"},
-            {"provider": "Groq", "client": groq_client, "model": "mixtral-8x7b-32768"},
+            {"provider": "Gemini", "client": gemini_client, "model": "gemini-1.5-pro"},
             {"provider": "Gemini", "client": gemini_client, "model": "gemini-1.5-flash"}
         ])
 
@@ -367,101 +289,81 @@ async def call_llm_with_fallback(messages, tools=None, tool_choice=None, tempera
     for route in MODELS_ROUTE:
         try:
             if route["provider"] == "Groq":
-                kwargs = {"model": route["model"], "messages": messages}
-                if temperature is not None:
-                    kwargs["temperature"] = temperature
-
-                # Exclude tools for vision models to avoid API errors
+                kwargs = {"model": route["model"], "messages": messages, "stream": not bool(tools)}
+                if temperature is not None: kwargs["temperature"] = temperature
                 if tools and "vision" not in route["model"].lower():
                     kwargs["tools"] = tools
                     kwargs["tool_choice"] = tool_choice or "auto"
-                else:
-                    kwargs["stream"] = True
-
+                
                 loop = asyncio.get_running_loop()
-                completion = await loop.run_in_executor(
-                    None,
-                    lambda k=kwargs: route["client"].chat.completions.create(**k)
-                )
-                return completion, route["model"]
+                stream = await loop.run_in_executor(None, lambda: route["client"].chat.completions.create(**kwargs))
+                
+                if kwargs["stream"]:
+                    async def async_token_stream():
+                        for chunk in stream:
+                            if chunk.choices and chunk.choices[0].delta.content:
+                                yield chunk.choices[0].delta.content
+                    return async_token_stream(), route["model"]
+                else:
+                    return stream, route["model"]
 
             elif route["provider"] == "Gemini":
-                contents = []
                 system_instruction = None
+                contents = []
                 for msg in messages:
-                    role = msg.get("role")
-                    content = msg.get("content")
-
-                    if role == "system":
-                        system_instruction = content
+                    if msg.get("role") == "system":
+                        system_instruction = msg.get("content")
                         continue
+                    
+                    role_map = {"user": "user", "assistant": "model", "model": "model"}
+                    msg_role = role_map.get(msg.get("role"), "user")
+                    
+                    if isinstance(msg.get("content"), str):
+                        contents.append({"role": msg_role, "parts": [msg["content"]]})
+                    elif isinstance(msg.get("content"), list):
+                        parts = []
+                        for block in msg["content"]:
+                            if block.get("type") == "text":
+                                parts.append(block.get("text"))
+                            elif block.get("type") == "image_url":
+                                url = block["image_url"]["url"]
+                                if url.startswith("data:image/"):
+                                    mime_type = url.split(";")[0].split(":")[1]
+                                    base64_data = url.split(",")[1]
+                                    import base64
+                                    parts.append({
+                                        "mime_type": mime_type,
+                                        "data": base64.b64decode(base64_data)
+                                    })
+                        contents.append({"role": msg_role, "parts": parts})
 
-                    parts = []
-                    if isinstance(content, str):
-                        parts.append(content)
-                    elif isinstance(content, list):
-                        for item in content:
-                            if item.get("type") == "text":
-                                parts.append(item.get("text"))
-                            elif item.get("type") == "image_url":
-                                url = item.get("image_url", {}).get("url", "")
-                                if url.startswith("data:image"):
-                                    import io
-                                    from PIL import Image
-                                    header, encoded = url.split(",", 1)
-                                    img_data = base64.b64decode(encoded)
-                                    img = Image.open(io.BytesIO(img_data))
-                                    parts.append(img)
-
-                    gemini_role = "user" if role == "user" else "model"
-                    contents.append({"role": gemini_role, "parts": parts})
-
-                gen_config = route["client"].types.GenerationConfig(
-                    temperature=temperature if temperature is not None else 0.7
+                gen_config = route["client"].types.GenerationConfig(temperature=temperature or 0.7)
+                gemini_tools = [t["function"] for t in tools] if (tools and isinstance(tools, list)) else None
+                
+                model = route["client"].GenerativeModel(model_name=route["model"], tools=gemini_tools)
+                
+                loop = asyncio.get_running_loop()
+                response = await loop.run_in_executor(
+                    None, 
+                    lambda: model.generate_content(contents, generation_config=gen_config, stream=True)
                 )
-                gemini_tools = [t["function"] for t in tools] if tools else None
-                model = route["client"].GenerativeModel(
-                    model_name=route["model"],
-                    system_instruction=system_instruction,
-                    tools=gemini_tools
-                )
-
-                if tools:
-                    loop = asyncio.get_running_loop()
-                    response = await loop.run_in_executor(
-                        None,
-                        lambda: model.generate_content(contents, generation_config=gen_config)
-                    )
-                    import uuid
-                    gemini_tool_calls = []
-                    if response.candidates and response.candidates[0].content.parts:
-                        for part in response.candidates[0].content.parts:
-                            if hasattr(part, "function_call") and part.function_call:
-                                args_dict = dict(part.function_call.args)
-                                args_json = json.dumps(args_dict)
-                                call_id = f"call_{uuid.uuid4().hex}"
-                                gemini_tool_calls.append(
-                                    GeminiToolCall(id=call_id, name=part.function_call.name, arguments=args_json)
-                                )
-                    if gemini_tool_calls:
-                        return GeminiCompletion(GeminiMessage(None, tool_calls=gemini_tool_calls)), route["model"]
-                    else:
-                        return GeminiCompletion(GeminiMessage(response.text)), route["model"]
-                else:
-                    loop = asyncio.get_running_loop()
-                    response = await loop.run_in_executor(
-                        None,
-                        lambda: model.generate_content(contents, generation_config=gen_config, stream=True)
-                    )
-                    return wrap_gemini_stream(response), route["model"]
+                
+                async def async_token_stream_gemini():
+                    for chunk in response:
+                        if hasattr(chunk, "text") and chunk.text:
+                            yield chunk.text
+                return async_token_stream_gemini(), route["model"]
 
         except Exception as e:
-            print(f"[-] Fallback model failed on {route['model']}: {e}")
+            print(f"[-] Fallback failed on {route['model']}: {e}")
             last_error = e
             continue
 
-    raise Exception(f"CRITICAL: All providers completely exhausted. Last error: {str(last_error)}")
-
+    # 4. The Safety Valve: Return a streaming generator even on failure
+    async def error_stream():
+        yield f"⚠️ NexusAI encountered an error: {str(last_error)[:50]}..."
+    
+    return error_stream(), "System Error"
 
 def message_to_dict(msg):
     """Safely converts a message (dict or ChatCompletionMessage) to a standard dict."""
@@ -510,11 +412,7 @@ async def set_starters(user: cl.User | None = None, **kwargs):
             message="Search the textbooks and explain Page Replacement Algorithms with examples.",
             icon="/public/favicon.ico"
         ),
-        cl.Starter(
-            label="🎮 Gamer Latency Check",
-            message="Predict my gaming network ping stability for this hour.",
-            icon="/public/favicon.ico"
-        ),
+
         cl.Starter(
             label="🌐 Live Web Intel",
             message="Search the web for the current AWS server status and any outages.",
@@ -538,7 +436,7 @@ async def chat_profile(user: cl.User | None = None, **kwargs):
             starters=[
                 cl.Starter(label="🌐 Live Web Search", message="Search the web for the current AWS server status and any active outages.", icon="/public/favicon.ico"),
                 cl.Starter(label="📚 Scholar RAG", message="Search the textbooks and explain memory management and virtual memory.", icon="/public/favicon.ico"),
-                cl.Starter(label="🎮 Gamer Ping", message="Check network stability and predict latency for gaming at 8pm.", icon="/public/favicon.ico"),
+
                 cl.Starter(label="🖼️ Analyze Image", message="I'll upload an image — describe what you see and extract all key information.", icon="/public/favicon.ico"),
             ]
         ),
@@ -553,28 +451,37 @@ async def chat_profile(user: cl.User | None = None, **kwargs):
                 cl.Starter(label="🌐 Research Topic", message="Search the web and textbooks for recent advances in transformer architectures.", icon="/public/favicon.ico"),
             ]
         ),
-        cl.ChatProfile(
-            name="Gamer Mode",
-            markdown_description="**Gaming analytics** — network stability, ping prediction, and live server status checks.",
-            icon="https://cdn-icons-png.flaticon.com/512/808/808439.png",
-            starters=[
-                cl.Starter(label="🎮 Check Ping Now", message="Check network ping for my current gaming session stability.", icon="/public/favicon.ico"),
-                cl.Starter(label="🌐 Server Status", message="Search the web for current game server status and any outages.", icon="/public/favicon.ico"),
-                cl.Starter(label="📊 Peak Hour Latency", message="Predict latency for hour 20 and suggest optimal gaming windows.", icon="/public/favicon.ico"),
-                cl.Starter(label="⚡ Best Play Time", message="Analyze today's full latency predictions and find the best gaming window.", icon="/public/favicon.ico"),
-            ]
-        ),
-        cl.ChatProfile(
-            name="Voice Mode",
-            markdown_description="**Audio processing** — speak via Whisper transcription with full AI response.",
-            icon="https://cdn-icons-png.flaticon.com/512/709/709682.png",
-            starters=[
-                cl.Starter(label="🎙️ Start Voice", message="I'm ready to use voice mode. I'll speak my next query.", icon="/public/favicon.ico"),
-                cl.Starter(label="📝 Transcribe Audio", message="Please transcribe the audio I'm about to upload.", icon="/public/favicon.ico"),
-            ]
-        ),
     ]
 
+
+async def initialize_user_memory(user: cl.User):
+    # Extract a friendly name from the identifier (e.g. from an email or username)
+    name_parts = user.identifier.split("@")[0].replace("_", ".").split(".")
+    first_name = name_parts[0].capitalize() if name_parts else user.identifier.capitalize()
+    last_name = name_parts[1].capitalize() if len(name_parts) > 1 else ""
+    
+    try:
+        from sqlalchemy import text
+        async with data_layer.engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    INSERT OR REPLACE INTO user_primary_memory 
+                    (user_id, username, first_name, last_name, current_model, current_mode, updated_at) 
+                    VALUES (:user_id, :username, :first_name, :last_name, :current_model, :current_mode, :updated_at)
+                """),
+                {
+                    "user_id": user.identifier,
+                    "username": user.identifier,
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "current_model": "llama-3.3-70b-versatile",
+                    "current_mode": "Omni Mode",
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+            )
+    except Exception as e:
+        print(f"[-] Could not initialize primary memory: {e}")
+    return user
 
 @cl.password_auth_callback
 async def auth_callback(username: str, password: str):
@@ -590,12 +497,14 @@ async def auth_callback(username: str, password: str):
     try:
         existing_user = await data_layer.get_user(username)
         if existing_user:
-            return cl.User(identifier=existing_user.identifier, metadata=existing_user.metadata)
+            user = cl.User(identifier=existing_user.identifier, metadata=existing_user.metadata)
+            return await initialize_user_memory(user)
         else:
             new_user = cl.User(identifier=username, metadata={"type": "passwordless"})
             persisted_user = await data_layer.create_user(new_user)
             if persisted_user:
-                return cl.User(identifier=persisted_user.identifier, metadata=persisted_user.metadata)
+                user = cl.User(identifier=persisted_user.identifier, metadata=persisted_user.metadata)
+                return await initialize_user_memory(user)
             return None
     except Exception as e:
         print(f"[-] Auth callback database error: {e}")
@@ -618,15 +527,19 @@ async def start_chat():
                 WHERE "userIdentifier" = :identifier 
                 ORDER BY "createdAt" DESC
             """
-            threads = await data_layer.execute_sql(query=query, parameters={"identifier": identifier})
+            from sqlalchemy import text
+            async with data_layer.engine.begin() as conn:
+                result = await conn.execute(text(query), {"identifier": identifier})
+                threads = [dict(row._mapping) for row in result.fetchall()] if result.returns_rows else []
             if isinstance(threads, list) and len(threads) > 3:
                 for old_thread in threads[3:]:
                     tid = old_thread["id"]
                     try:
                         # Fallback to direct SQL delete if built-in throws Author not found
-                        await data_layer.execute_sql('DELETE FROM steps WHERE "threadId" = :id', parameters={"id": tid})
-                        await data_layer.execute_sql('DELETE FROM elements WHERE "threadId" = :id', parameters={"id": tid})
-                        await data_layer.execute_sql('DELETE FROM threads WHERE id = :id', parameters={"id": tid})
+                        async with data_layer.engine.begin() as conn:
+                            await conn.execute(text('DELETE FROM steps WHERE "threadId" = :id'), {"id": tid})
+                            await conn.execute(text('DELETE FROM elements WHERE "threadId" = :id'), {"id": tid})
+                            await conn.execute(text('DELETE FROM threads WHERE id = :id'), {"id": tid})
                     except Exception as e:
                         print(f"[-] Force delete failed for {tid}: {e}")
     except Exception as e:
@@ -636,20 +549,47 @@ async def start_chat():
     chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
     cl.user_session.set("chat_profile", chat_profile_name)
 
-    # AskUserMessage for Gamer Mode Context
-    game_context = ""
-    if chat_profile_name == "Gamer Mode":
-        try:
-            res = await cl.AskUserMessage(
-                content="Welcome to Gamer Mode! What game are you playing? (e.g. Valorant, Apex, CS2):",
-                timeout=120
-            ).send()
-            if res:
-                game_context = f"\nUser is currently playing: {res.get('output', '')}"
-        except Exception as e:
-            print(f"[-] Gamer start profile error: {e}")
 
-    system_instruction = f"You are NexusAI, a dual-engine Scholar-Gamer CoPilot. Maintain deep context awareness. Your current profile is {chat_profile_name}.{game_context}"
+
+    # Fetch Global User Memory (Dual-Tier)
+    u_id = getattr(user, "identifier", "")
+    system_instruction = f"You are NexusAI, a Scholar CoPilot. Maintain deep context awareness. Your current profile is {chat_profile_name}."
+    
+    if u_id:
+        try:
+            layer = cl_data.get_data_layer()
+            if layer:
+                from sqlalchemy import text
+                async with layer.engine.begin() as conn:
+                    # 1. Fetch Primary Memory
+                    prim_raw = await conn.execute(text('SELECT * FROM user_primary_memory WHERE user_id = :id'), {"id": u_id})
+                    prim_res = [dict(row._mapping) for row in prim_raw.fetchall()] if prim_raw.returns_rows else []
+                    
+                    # 2. Fetch Secondary Memory
+                    sec_raw = await conn.execute(text('SELECT pref_key, pref_value FROM user_secondary_memory WHERE user_id = :id'), {"id": u_id})
+                    sec_res = [dict(row._mapping) for row in sec_raw.fetchall()] if sec_raw.returns_rows else []
+                
+                if prim_res:
+                    p_data = prim_res[0]
+                    first_name = p_data.get("first_name", "")
+                    last_name = p_data.get("last_name", "")
+                    username = p_data.get("username", "")
+                    c_model = p_data.get("current_model", "")
+                    c_mode = p_data.get("current_mode", "")
+                    
+                    preferences_json = json.dumps({row["pref_key"]: row["pref_value"] for row in sec_res}) if sec_res else "{}"
+                    
+                    user_memory = f"\n\n[SYSTEM MEMORY - PRIMARY: User is {first_name} {last_name} (@{username}). Active engine: {c_model}. Mode: {c_mode}. SECONDARY PREFERENCES: {preferences_json}]"
+                    
+                    system_instruction += user_memory
+                    
+        except Exception as e:
+            print(f"[-] Error fetching dual-tier global memory: {e}")
+
+    memory_guardrail = "\nCRITICAL: Never execute a web search tool query to find out who the current user is or what their history is. If their LTM profile facts do not contain a piece of information, simply ask them directly."
+    json_guardrail = "\n[GUARDRAIL: When answering questions about weather, current events, or real-time news, you MUST invoke the web search tool tool call format. Never guess or hallucinate data.]\n[SYSTEM: You are NexusAI. Output ONLY valid JSON for tool calls. Do not use <function> or XML tags. If you do not have the info, call the tool first.]"
+    system_instruction += f"{memory_guardrail}{json_guardrail}"
+    
     cl.user_session.set("message_history", [{"role": "system", "content": system_instruction}])
 
     # Chat Settings setup
@@ -686,14 +626,9 @@ async def start_chat():
         print(f"[-] Chat settings configuration error: {e}")
 
     # Slash commands registry menu
-    commands = [
+    commands: List[Any] = [
         {"id": "scholar", "icon": "book", "description": "Force Textbook Search"},
-        {"id": "gamer", "icon": "gamepad", "description": "Force Ping Prediction"},
-        {"id": "web", "icon": "globe", "description": "Force Live Internet Search"},
-        {"id": "clear", "icon": "trash", "description": "Clear the visual UI display but keep context memory"},
-        {"id": "reset-chat", "icon": "refresh-cw", "description": "Wipe current thread memory"},
-        {"id": "new-chat", "icon": "plus", "description": "Start new chat thread (limit 3)"},
-        {"id": "new", "icon": "bolt", "description": "Factory Reset (Wipes session data, keeps accounts)"}
+        {"id": "web", "icon": "globe", "description": "Force Live Internet Search"}
     ]
     try:
         await cl.context.emitter.set_commands(commands) # type: ignore
@@ -704,13 +639,12 @@ async def start_chat():
     try:
         await cl.context.emitter.set_modes([
             cl.Mode(
-                id="tool_focus",
-                name="Focus",
+                id="model_selection",
+                name="Model",
                 options=[
-                    cl.ModeOption(id="auto", name="Auto", default=True),
-                    cl.ModeOption(id="scholar", name="Scholar"),
-                    cl.ModeOption(id="gamer", name="Gamer"),
-                    cl.ModeOption(id="web", name="Web"),
+                    cl.ModeOption(id="llama-3.3-70b-versatile", name="Llama 3.3 70B", default=True),
+                    cl.ModeOption(id="gemini-1.5-flash", name="Gemini 1.5 Flash"),
+                    cl.ModeOption(id="gemini-1.5-pro", name="Gemini 1.5 Pro")
                 ]
             )
         ])
@@ -719,7 +653,6 @@ async def start_chat():
 
     mode_icons = {
         "Scholar Mode": "📚",
-        "Gamer Mode": "🎮",
         "Omni Mode": "🌐",
         "Voice Mode": "🎙️"
     }
@@ -729,8 +662,8 @@ async def start_chat():
     welcome_text = f"""<div class="nx-welcome-card">
   <div class="nx-mode-badge">{mode_icon} {chat_profile_name}</div>
   <h1>⚡ NexusAI</h1>
-  <p><strong>Dual-Engine AI Ready</strong> — Scholar 📚 · Gamer 🎮 · Omni 🌐</p>
-  <p class="nx-welcome-desc" style="margin-top:10px;font-size:13px;">Upload images, PDFs, code files &amp; documents · Use <code>/scholar</code>, <code>/gamer</code>, <code>/web</code> slash commands</p>
+  <p><strong>Dual-Engine AI Ready</strong> — Scholar 📚 · Omni 🌐</p>
+  <p class="nx-welcome-desc" style="margin-top:10px;font-size:13px;">Upload images, PDFs, code files &amp; documents · Use <code>/scholar</code>, <code>/web</code> slash commands</p>
 </div>"""
 
     try:
@@ -761,13 +694,12 @@ async def on_chat_resume(thread):
     try:
         await cl.context.emitter.set_modes([
             cl.Mode(
-                id="tool_focus",
-                name="Focus",
+                id="model_selection",
+                name="Model",
                 options=[
-                    cl.ModeOption(id="auto", name="Auto", default=True),
-                    cl.ModeOption(id="scholar", name="Scholar"),
-                    cl.ModeOption(id="gamer", name="Gamer"),
-                    cl.ModeOption(id="web", name="Web"),
+                    cl.ModeOption(id="llama-3.3-70b-versatile", name="Llama 3.3 70B", default=True),
+                    cl.ModeOption(id="gemini-1.5-flash", name="Gemini 1.5 Flash"),
+                    cl.ModeOption(id="gemini-1.5-pro", name="Gemini 1.5 Pro")
                 ]
             )
         ])
@@ -777,7 +709,7 @@ async def on_chat_resume(thread):
     # Reconstruct message history from persisted thread steps
     message_history = []
     system_instruction = (
-        f"You are NexusAI, a dual-engine Scholar-Gamer CoPilot. "
+        f"You are NexusAI, a dual-engine Scholar-Omni CoPilot. "
         f"Maintain deep context awareness. Your current profile is {chat_profile_name}."
     )
     message_history.append({"role": "system", "content": system_instruction})
@@ -854,6 +786,9 @@ async def upload_document(file: UploadFile = File(...)):
         content = await file.read()
         async with aiofiles.open(file_path, "wb") as f:
             await f.write(content)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, build_vector_database)
 
         return {"filename": safe_name, "status": "success", "url": f"/public/elements/{safe_name}"}
     except Exception as e:
@@ -1025,7 +960,13 @@ async def auto_rename_session(history):
                 # FIX P2-5: Preserve existing metadata before update_thread
                 try:
                     existing_thread = await layer.get_thread(thread_id)
-                    existing_meta = existing_thread.get("metadata", {}) if existing_thread and existing_thread.get("metadata") else {}
+                    existing_meta = existing_thread.get("metadata", {}) if existing_thread else {}
+                    if isinstance(existing_meta, str):
+                        import json
+                        try:
+                            existing_meta = json.loads(existing_meta)
+                        except:
+                            existing_meta = {}
                 except Exception:
                     existing_meta = {}
                 await layer.update_thread(thread_id, name=title, metadata=existing_meta)
@@ -1060,12 +1001,20 @@ async def add_voice_to_response(response_msg, full_response):
 @cl.on_message
 async def handle_message(message: cl.Message):
     try:
+        # Extract the model selection globally
+        mode_data = getattr(message, 'modes', {}) or {}
+        selected_model = mode_data.get("model_selection")
+        selected_model = selected_model or "llama-3.3-70b-versatile"
+
         history_raw = cl.user_session.get("message_history")
         history = [message_to_dict(m) for m in history_raw] if history_raw else []
         
+        if history and history[0].get("role") == "system":
+            history[0]["content"] += f"\n\n[SYSTEM: You are currently powered by the {selected_model} engine. You have full access to web search tools.]"
+        
         custom_sys_prompt = (cl.user_session.get("system_prompt") or "").strip()
         if custom_sys_prompt and history and history[0].get("role") == "system":
-            history[0]["content"] = history[0]["content"] + f"\n\n[USER CUSTOM INSTRUCTION]: {custom_sys_prompt}"
+            history[0]["content"] += f"\n\n[USER CUSTOM INSTRUCTION]: {custom_sys_prompt}"
 
         # Intercept string-based manual command inputs
         cmd = message.command
@@ -1075,71 +1024,9 @@ async def handle_message(message: cl.Message):
             if parts:
                 cmd = parts[0]
 
-        # --- COMMAND ISOLATION (EARLY RETURN RULE) ---
-        if cmd in ("reset-chat", "clear", "new-chat", "new"):
-            if cmd == "reset-chat":
-                chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
-                system_instruction = f"You are NexusAI. Maintain deep context awareness. Your current profile is {chat_profile_name}."
-                cl.user_session.set("message_history", [{"role": "system", "content": system_instruction}])
-                await cl.Message(content="🔄 *Memory wiped. Starting a fresh neural link within this thread.*").send()
-                return
+        # --- COMMAND PROCESSING ---
 
-            elif cmd == "clear":
-                await cl.CopilotFunction(name="clear_visual_chat", args={}).acall()
-                await cl.Message(content="🧹 *Display cleared. NexusAI still retains memory of this session.*").send()
-                return
 
-            elif cmd == "new-chat":
-                cl.user_session.set("message_history", [])
-                await cl.CopilotFunction(name="new_chat_session", args={}).acall()
-                return
-
-            elif cmd == "new":
-                cl.user_session.set("message_history", [])
-                layer = cl_data.get_data_layer()
-                try:
-                    # FIX P0-2: Selectively drop only session data tables — NOT users table
-                    from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
-                    if layer and isinstance(layer, SQLAlchemyDataLayer) and hasattr(layer, "engine"):
-                        async with layer.engine.begin() as conn:
-                            for table in PURGEABLE_TABLES:
-                                await conn.run_sync(lambda c, t=table: t.drop(c, checkfirst=True))
-                            for table in reversed(PURGEABLE_TABLES):
-                                await conn.run_sync(lambda c, t=table: t.create(c, checkfirst=True))
-                    await cl.Message(content="💥 *Factory Reset Complete. Session data purged. User accounts preserved.*").send()
-                except Exception as db_err:
-                    print(f"[-] Factory reset database error: {db_err}")
-                    await cl.ErrorMessage(content=f"⚠️ Failed database reset: {db_err}").send()
-                await cl.CopilotFunction(name="new_chat_session", args={}).acall()
-                return
-
-        msg_content = message.content.strip().lower() if message.content and hasattr(message.content, "strip") else ""
-        if "check ping" in msg_content or "predict ping" in msg_content:
-            digits = re.findall(r'\d+', msg_content)
-            if not digits:
-                ask_msg = await cl.AskUserMessage(content="What hour (0-23)?", timeout=60).send()
-                if ask_msg:
-                    ans_digits = re.findall(r'\d+', ask_msg.get('output', ''))
-                    hour_val = int(ans_digits[0]) if ans_digits else datetime.now().hour
-                else:
-                    hour_val = datetime.now().hour
-
-                ping = predict_latency(hour=hour_val, minute=0, server_code=0)
-                response_msg = cl.Message(
-                    content=f"🎮 **Network Telemetry**: Predicted ping for hour `{hour_val}:00` is `{ping} ms`."
-                )
-                actions = [
-                    cl.Action(name="regenerate_answer", label="🔄 Regenerate Response", payload={"action": "regenerate"}),
-                    cl.Action(name="verify_citations", label="📄 Verify Citations", payload={"action": "verify"}),
-                    cl.Action(name="search_web_instead", label="🌐 Search Web Instead", payload={"action": "search_web"})
-                ]
-                response_msg.actions = actions
-                await response_msg.send()
-                history.append({"role": "user", "content": f"Check ping for hour {hour_val}"})
-                history.append({"role": "assistant", "content": response_msg.content})
-                # FIX P2-15: Sanitize before storing
-                cl.user_session.set("message_history", sanitize_history_for_storage(history))
-                return
 
         # FIX P2-21: Use regex to parse FILE_SELECTED to handle filenames containing ']'
         if message.content.startswith("[FILE_SELECTED:"):
@@ -1148,7 +1035,12 @@ async def handle_message(message: cl.Message):
                 filename = match.group(1)
                 file_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", filename)
                 if os.path.exists(file_path):
-                    file_element = cl.File(name=filename, path=file_path, display="inline")
+                    if filename.lower().endswith('.pdf'):
+                        file_element = cl.Pdf(name=filename, path=file_path, display="side")
+                        if history and history[0].get("role") == "system":
+                            history[0]["content"] += f"\n\n[SYSTEM: You have access to a PDF in the side-pane named '{filename}'. Always refer to the document by name when answering questions.]"
+                    else:
+                        file_element = cl.File(name=filename, path=file_path, display="inline")
                     await cl.Message(
                         content=f"📎 **File Focused**: NexusAI has loaded `{filename}`. Ask me questions about it!",
                         elements=[file_element]
@@ -1169,21 +1061,8 @@ async def handle_message(message: cl.Message):
         tool_choice = None
         if message.command == "scholar":
             tool_choice = {"type": "function", "function": {"name": "query_academic_textbooks"}}
-        elif message.command == "gamer":
-            tool_choice = {"type": "function", "function": {"name": "check_game_network_stability"}}
         elif message.command == "web":
             tool_choice = {"type": "function", "function": {"name": "execute_web_search"}}
-
-        # Supplement slash commands with Modes picker selection
-        if not tool_choice:
-            active_mode = (getattr(message, 'modes', None) or {}).get("tool_focus", "auto")
-            mode_to_tool = {
-                "scholar": "query_academic_textbooks",
-                "gamer": "check_game_network_stability",
-                "web": "execute_web_search",
-            }
-            if active_mode in mode_to_tool:
-                tool_choice = {"type": "function", "function": {"name": mode_to_tool[active_mode]}}
 
         attached_text = ""
         image_contents = []
@@ -1219,6 +1098,7 @@ async def handle_message(message: cl.Message):
                             file_content = f.read()
                         ext = name_lower.rsplit('.', 1)[-1]
                         attached_text += f"\n\n--- {ext.upper()} File: {element.name} ---\n```{ext}\n{file_content}\n```"
+                        await cl.Text(name="Document Context Extraction", content=file_content[:500] + "...\n[Full text loaded into memory]", display="side").send(for_id=message.id)
 
                     # Word documents
                     elif name_lower.endswith(('.docx', '.doc')):
@@ -1226,6 +1106,7 @@ async def handle_message(message: cl.Message):
                         doc = docx.Document(el_path)
                         text_content = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
                         attached_text += f"\n\n--- Word Document: {element.name} ---\n{text_content}"
+                        await cl.Text(name="Document Context Extraction", content=text_content[:500] + "...\n[Full text loaded into memory]", display="side").send(for_id=message.id)
 
                     # PowerPoint presentations
                     elif name_lower.endswith(('.pptx', '.ppt')):
@@ -1235,6 +1116,7 @@ async def handle_message(message: cl.Message):
                             [getattr(shape, "text", "") for slide in prs.slides for shape in slide.shapes
                              if hasattr(shape, "text") and getattr(shape, "text", "").strip()])
                         attached_text += f"\n\n--- Presentation: {element.name} ({len(prs.slides)} slides) ---\n{text_content}"
+                        await cl.Text(name="Document Context Extraction", content=text_content[:500] + "...\n[Full text loaded into memory]", display="side").send(for_id=message.id)
 
                     # PDF documents
                     elif name_lower.endswith('.pdf'):
@@ -1244,6 +1126,9 @@ async def handle_message(message: cl.Message):
                             pages_text = [page.extract_text() for page in reader.pages if page.extract_text()]
                             text_content = "\n\n".join(pages_text)
                         attached_text += f"\n\n--- PDF Document: {element.name} ({len(reader.pages)} pages) ---\n{text_content}"
+                        await cl.Pdf(name=element.name, path=el_path, display="side").send(for_id=message.id)
+                        if history and history[0].get("role") == "system":
+                            history[0]["content"] += f"\n\n[SYSTEM: You have access to a PDF in the side-pane named '{element.name}'. Always refer to the document by name when answering questions.]"
 
                     # Excel / spreadsheets
                     elif name_lower.endswith(('.xlsx', '.xls', '.ods')):
@@ -1320,8 +1205,6 @@ async def handle_message(message: cl.Message):
         active_tools = TOOLS_SCHEMA.copy()
         if chat_profile_name == "Scholar Mode":
             active_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] in ("query_academic_textbooks", "execute_web_search")]
-        elif chat_profile_name == "Gamer Mode":
-            active_tools = [t for t in TOOLS_SCHEMA if t["function"]["name"] in ("check_game_network_stability", "execute_web_search")]
 
         # FIX P2-16: Idempotent DeepSearch injection — only inject once
         DEEP_SEARCH_MARKER = "[SYSTEM INJECTION: Deep Web Search is enabled."
@@ -1336,20 +1219,24 @@ async def handle_message(message: cl.Message):
                     "content": f"{DEEP_SEARCH_MARKER} Actively use the web search tool to find live, real-time facts.]"
                 })
 
-        selected_model = cl.user_session.get("model")
+        selected_model = (getattr(message, 'modes', None) or {}).get("model_selection", "llama-3.3-70b-versatile")
 
         if has_vision:
-            streamed_completion, _ = await call_llm_with_fallback(history, temperature=temperature, vision_mode=True, requested_model=selected_model)
+            temp_history = history.copy()
+            temp_history.append({
+                "role": "system", 
+                "content": f"[SYSTEM: You are currently powered by the {selected_model} engine. You have full access to web search tools.]"
+            })
+            streamed_completion, _ = await call_llm_with_fallback(temp_history, temperature=temperature, vision_mode=True, requested_model=selected_model)
             response_msg = cl.Message(content="")
             await response_msg.send()
             full_response = ""
-            for chunk in streamed_completion:
+            async for token in streamed_completion:
                 if cl.user_session.get("should_stop"):
                     cl.user_session.set("should_stop", False)
                     break
-                text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
-                full_response += text_tok
-                await response_msg.stream_token(text_tok)
+                full_response += token
+                await response_msg.stream_token(token)
             history.append({"role": "assistant", "content": full_response})
             actions = [
                 cl.Action(name="regenerate_answer", label="🔄 Regenerate", icon="refresh-cw", payload={"action": "regenerate"}),
@@ -1357,12 +1244,15 @@ async def handle_message(message: cl.Message):
                 cl.Action(name="search_web_instead", label="🌐 Search Web", icon="globe", payload={"action": "search_web"})
             ]
             response_msg.actions = actions
-            if chat_profile_name == "Voice Mode":
-                await add_voice_to_response(response_msg, full_response)
             await response_msg.update()
 
         else:
-            completion, _ = await call_llm_with_fallback(history, tools=active_tools, tool_choice=tool_choice, temperature=temperature, requested_model=selected_model)
+            temp_history = history.copy()
+            temp_history.append({
+                "role": "system", 
+                "content": f"[SYSTEM: You are currently powered by the {selected_model} engine. You have full access to web search tools.]"
+            })
+            completion, _ = await call_llm_with_fallback(temp_history, tools=active_tools, tool_choice=tool_choice, temperature=temperature, requested_model=selected_model)
             response_message = completion.choices[0].message
 
             if response_message.tool_calls:
@@ -1375,24 +1265,7 @@ async def handle_message(message: cl.Message):
                         step.input = args
                         tool_content = ""
 
-                        if func == "check_game_network_stability":
-                            hour_val = args.get("hour")
-                            if hour_val is None:
-                                ask_msg = await cl.AskUserMessage(content="What hour (0-23)?", timeout=60).send()
-                                if ask_msg:
-                                    try:
-                                        digits = "".join(filter(str.isdigit, ask_msg.get('output', '')))
-                                        hour_val = int(digits)
-                                        if not (0 <= hour_val <= 23):
-                                            hour_val = datetime.now().hour
-                                    except ValueError:
-                                        hour_val = datetime.now().hour
-                                else:
-                                    hour_val = datetime.now().hour
-                            ping = predict_latency(hour=hour_val, minute=0, server_code=0)
-                            tool_content = f"Estimated latency: {ping} ms."
-
-                        elif func == "query_academic_textbooks":
+                        if func == "query_academic_textbooks":
                             tool_content, sources = search_textbooks_with_sources(args.get("search_query"), k=3)
                             cl.user_session.set("last_rag_result", tool_content)
                             cl.user_session.set("last_rag_sources", sources)
@@ -1419,21 +1292,51 @@ async def handle_message(message: cl.Message):
                             # FIX P1-9: Use async wrapper
                             tool_content = await perform_web_search_async(args.get("query"))
 
+                        elif func == "update_user_memory":
+                            fact_key = args.get("fact_key")
+                            fact_value = args.get("fact_value")
+                            user = cl.user_session.get("user")
+                            if user:
+                                u_id = getattr(user, "identifier", "")
+                                if u_id:
+                                    try:
+                                        layer = cl_data.get_data_layer()
+                                        if layer:
+                                            from sqlalchemy import text
+                                            async with layer.engine.begin() as conn:
+                                                await conn.execute(
+                                                    text('INSERT OR REPLACE INTO user_secondary_memory (user_id, pref_key, pref_value) VALUES (:user_id, :pref_key, :pref_value)'), 
+                                                    {"user_id": u_id, "pref_key": fact_key, "pref_value": fact_value}
+                                                )
+                                            tool_content = f"Memory updated successfully: {fact_key} = {fact_value}"
+                                        else:
+                                            tool_content = "Data layer unavailable. Could not save global memory."
+                                    except Exception as e:
+                                        tool_content = f"Failed to save global memory to database: {e}"
+                                else:
+                                    tool_content = "User identifier missing. Could not save global memory."
+                            else:
+                                tool_content = "No authenticated user. Could not save global memory."
+
                         step.output = tool_content
 
                     history.append({"role": "tool", "tool_call_id": tool_call.id, "name": func, "content": tool_content})
 
-                final_completion, _ = await call_llm_with_fallback(history, temperature=temperature, requested_model=selected_model)
+                temp_history = history.copy()
+                temp_history.append({
+                    "role": "system", 
+                    "content": f"[SYSTEM: You are currently powered by the {selected_model} engine. You have full access to web search tools.]"
+                })
+                final_completion, _ = await call_llm_with_fallback(temp_history, temperature=temperature, requested_model=selected_model)
                 response_msg = cl.Message(content="")
                 await response_msg.send()
                 full_response = ""
-                for chunk in final_completion:
+                async for token in final_completion:
                     if cl.user_session.get("should_stop"):
                         cl.user_session.set("should_stop", False)
                         break
-                    text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
-                    full_response += text_tok
-                    await response_msg.stream_token(text_tok)
+                    full_response += token
+                    await response_msg.stream_token(token)
                 history.append({"role": "assistant", "content": full_response})
 
                 actions = [
@@ -1458,23 +1361,25 @@ async def handle_message(message: cl.Message):
                     cl.user_session.set("last_rag_sources", None)
                 if elements:
                     response_msg.elements = elements
-                if chat_profile_name == "Voice Mode":
-                    await add_voice_to_response(response_msg, full_response)
                 await response_msg.update()
 
             else:
                 selected_model = cl.user_session.get("model")
-                streamed_completion, _ = await call_llm_with_fallback(history, temperature=temperature, requested_model=selected_model)
+                temp_history = history.copy()
+                temp_history.append({
+                    "role": "system", 
+                    "content": f"[SYSTEM: You are currently powered by the {selected_model} engine. You have full access to web search tools.]"
+                })
+                streamed_completion, _ = await call_llm_with_fallback(temp_history, temperature=temperature, requested_model=selected_model)
                 response_msg = cl.Message(content="")
                 await response_msg.send()
                 full_response = ""
-                for chunk in streamed_completion:
+                async for token in streamed_completion:
                     if cl.user_session.get("should_stop"):
                         cl.user_session.set("should_stop", False)
                         break
-                    text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
-                    full_response += text_tok
-                    await response_msg.stream_token(text_tok)
+                    full_response += token
+                    await response_msg.stream_token(token)
                 history.append({"role": "assistant", "content": full_response})
                 actions = [
                     cl.Action(name="regenerate_answer", label="🔄 Regenerate", icon="refresh-cw", payload={"action": "regenerate"}),
@@ -1482,8 +1387,6 @@ async def handle_message(message: cl.Message):
                     cl.Action(name="search_web_instead", label="🌐 Search Web", icon="globe", payload={"action": "search_web"})
                 ]
                 response_msg.actions = actions
-                if chat_profile_name == "Voice Mode":
-                    await add_voice_to_response(response_msg, full_response)
                 await response_msg.update()
 
         # Auto rename and persist — FIX P2-15: sanitize before storing
@@ -1502,42 +1405,26 @@ async def on_regenerate(action: cl.Action):
             return
         if history[-1].get("role") == "assistant":
             history.pop()
+        
         temperature = cl.user_session.get("temperature", 0.7)
         selected_model = cl.user_session.get("model")
         completion, _ = await call_llm_with_fallback(history, temperature=temperature, requested_model=selected_model)
+        
         response_msg = cl.Message(content="")
         await response_msg.send()
+        
         full_response = ""
-        for chunk in completion:
-            text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
-            full_response += text_tok
-            await response_msg.stream_token(text_tok)
+        async for token in completion:
+            full_response += token
+            await response_msg.stream_token(token)
+            
         history.append({"role": "assistant", "content": full_response})
-        cl.user_session.set("message_history", sanitize_history_for_storage(history))
+        cl.user_session.set("message_history", history)
+        
         actions = [
-            cl.Action(name="regenerate_answer", label="🔄 Regenerate", icon="refresh-cw", payload={"action": "regenerate"}),
-            cl.Action(name="verify_citations", label="📄 Verify Citations", icon="file-check", payload={"action": "verify"}),
-            cl.Action(name="search_web_instead", label="🌐 Search Web", icon="globe", payload={"action": "search_web"})
+            cl.Action(name="regenerate_answer", label="🔄 Regenerate", payload={"action": "regenerate"}),
         ]
         response_msg.actions = actions
-        rag_content = cl.user_session.get("last_rag_result")
-        elements: List[Any] = []
-        if rag_content:
-            elements.append(cl.Text(name="Source", content=rag_content, display="side"))
-            sources = cl.user_session.get("last_rag_sources") or []
-            for src in sources:
-                if not isinstance(src, str):
-                    continue
-                src_path = os.path.join(os.path.dirname(__file__), "data", "textbooks", src)
-                if os.path.exists(src_path) and src.lower().endswith(".pdf"):
-                    elements.append(cl.Pdf(name=src, path=src_path, display="side"))
-            cl.user_session.set("last_rag_result", None)
-            cl.user_session.set("last_rag_sources", None)
-        if elements:
-            response_msg.elements = elements
-        chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
-        if chat_profile_name == "Voice Mode":
-            await add_voice_to_response(response_msg, full_response)
         await response_msg.update()
     except Exception as e:
         await cl.ErrorMessage(content=f"⚠️ Failed to regenerate answer: {str(e)}").send()
@@ -1576,10 +1463,9 @@ async def on_search_web_instead(action: cl.Action):
         response_msg = cl.Message(content="")
         await response_msg.send()
         full_response = ""
-        for chunk in completion:
-            text_tok = getattr(chunk.choices[0].delta, "content", "") or ""
-            full_response += text_tok
-            await response_msg.stream_token(text_tok)
+        async for token in completion:
+            full_response += token
+            await response_msg.stream_token(token)
         history.append({"role": "assistant", "content": full_response})
         cl.user_session.set("message_history", sanitize_history_for_storage(history))
         actions = [
@@ -1588,9 +1474,6 @@ async def on_search_web_instead(action: cl.Action):
             cl.Action(name="search_web_instead", label="🌐 Search Web", icon="globe", payload={"action": "search_web"})
         ]
         response_msg.actions = actions
-        chat_profile_name = cl.user_session.get("chat_profile") or "Omni Mode"
-        if chat_profile_name == "Voice Mode":
-            await add_voice_to_response(response_msg, full_response)
         await response_msg.update()
     except Exception as e:
         await cl.ErrorMessage(content=f"⚠️ Failed to search the web: {str(e)}").send()
